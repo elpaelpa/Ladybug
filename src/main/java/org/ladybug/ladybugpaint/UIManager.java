@@ -3,11 +3,16 @@ package org.ladybug.ladybugpaint;
 import javafx.geometry.Insets;
 import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
+import javafx.scene.SnapshotParameters;
 import javafx.scene.control.*;
+import javafx.scene.image.WritableImage;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
+import javafx.stage.Stage;
+
+import java.awt.image.BufferedImage;
 import java.util.Objects;
 
 public class UIManager {
@@ -21,6 +26,7 @@ public class UIManager {
 
     //Contains Tool Objects
     public ToolManager toolManager;
+    private ImageHandler imageHandler;
 
 
     private final ListView<Layer> layerListView = new ListView<>();
@@ -28,13 +34,14 @@ public class UIManager {
     private Layer strokeLayer;
 
     private final LadybugState state;
-
-    public UIManager(LadybugState state){
+    private  Stage currentStage;
+    public UIManager(LadybugState state,Stage stage){
         this.state = state;
-
+        this.currentStage = stage;
 
         addNewLayer();
         toolManager = new ToolManager(canvasStack);
+        imageHandler = new ImageHandler(currentStage,this);
 
         //Initial Values for sliders
         picker.setValue(Color.BLACK);
@@ -175,21 +182,28 @@ public class UIManager {
 //        ToggleButton bucket = createTool("Bucket", Tool.BUCKET, tools);
 //        ToggleButton eye = createTool("Eyedropper", Tool.EYEDROPPER, tools);
 
-//        Button undoBtn = new Button("Undo");
-//        Button redoBtn = new Button("Redo");
-//        Button export = new Button("Export PNG");
-//        undoBtn.setOnAction(e -> undo());
+        Button undoBtn = new Button("Undo");
+        Button redoBtn = new Button("Redo");
+        //undoBtn.setOnAction(e -> undo());
 //        redoBtn.setOnAction(e -> redo());
-//        export.setOnAction(e -> exportImage(stage));
 
 
-        bar.getChildren().add(new Button("Undo"));
-        bar.getChildren().add(new Button("Redo"));
+
+        Button export = new Button("Export PNG");
+//
+        export.setOnAction(e -> {
+            imageHandler.exportImage();
+        });
+
+        bar.getChildren().add(export);
+//        bar.getChildren().add(new Button("Undo"));
+//        bar.getChildren().add(new Button("Redo"));
 
 
 
         return bar;
     }
+
 
     private ToggleButton createToolButton(BaseTool tool, ToggleGroup group) {
 

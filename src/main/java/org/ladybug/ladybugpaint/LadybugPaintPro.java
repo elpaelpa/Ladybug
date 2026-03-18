@@ -3,24 +3,19 @@ package org.ladybug.ladybugpaint;
 import javafx.application.Application;
 import javafx.geometry.*;
 import javafx.scene.Scene;
-import javafx.scene.canvas.Canvas;
-import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
 public class LadybugPaintPro extends Application {
 
     private LadybugState state;
     private UIManager ui;
-
     @Override
     public void start(Stage stage) {
 
         this.state = new LadybugState();
-        this.ui = new UIManager(state);
-
+        this.ui = new UIManager(state,stage);
 
         stage.setTitle("ladybug paint");
         stage.setScene(createHomeScene(stage));
@@ -71,36 +66,6 @@ public class LadybugPaintPro extends Application {
         if (cssURL != null) scene.getStylesheets().add(cssURL.toExternalForm());
     }
 
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//    private void exportImage(Stage stage) {
-//        WritableImage snapshot = layerManager.getCanvasStack().snapshot(new SnapshotParameters(), null);
-//        BufferedImage bImage = new BufferedImage((int)snapshot.getWidth(), (int)snapshot.getHeight(), BufferedImage.TYPE_INT_ARGB);
-//        for (int y = 0; y < snapshot.getHeight(); y++) {
-//            for (int x = 0; x < snapshot.getWidth(); x++) {
-//                Color c = snapshot.getPixelReader().getColor(x, y);
-//                bImage.setRGB(x, y, (int)(c.getOpacity()*255)<<24|(int)(c.getRed()*255)<<16|(int)(c.getGreen()*255)<<8|(int)(c.getBlue()*255));
-//            }
-//        }
-//        FileChooser chooser = new FileChooser();
-//        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("PNG", "*.png"));
-//        File file = chooser.showSaveDialog(stage);
-//        if (file != null) {
-//            try {
-//                ImageIO.write(bImage, "png", file);
-//            } catch (IOException ex) {
-//                System.err.println("Failed to save image: " + ex.getMessage());
-//            }
-//        }
-//    }
-//
 
     public static void main(String[] args) {
         Application.launch(LadybugPaintPro.class, args);
