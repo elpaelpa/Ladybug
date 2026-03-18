@@ -43,7 +43,6 @@ public class LadybugPaintPro extends Application {
         applyCSS(scene);
         return scene;
     }
-
     private Scene createHomeScene(Stage stage) {
 
 
@@ -60,14 +59,12 @@ public class LadybugPaintPro extends Application {
         applyCSS(scene);
         return scene;
     }
-
     private void applyCSS(Scene scene) {
         java.net.URL cssURL = getClass().getResource("style.css");
         if (cssURL != null) scene.getStylesheets().add(cssURL.toExternalForm());
     }
 
-
-    public static void main(String[] args) {
-        Application.launch(LadybugPaintPro.class, args);
-    }
+//    public static void main(String[] args) {
+//        Application.launch(LadybugPaintPro.class, args);
+//    }
 }

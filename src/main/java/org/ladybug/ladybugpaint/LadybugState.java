@@ -1,42 +1,49 @@
 package org.ladybug.ladybugpaint;
 
+import javafx.scene.SnapshotParameters;
+import javafx.scene.image.WritableImage;
 import javafx.scene.paint.Color;
 
 public class LadybugState {
 
     //Managers
     public LayerManager layerManager;
-
-
-    //Shared Layer fields
-
     public LadybugState(){
         layerManager = new LayerManager(this);
     }
+    public void saveState() {
 
+        Layer activeLayer = layerManager.getActiveLayer();
+//        if(activeLayer ==null) return;
+        WritableImage snap = activeLayer.canvas.snapshot(new SnapshotParameters(), null);
+        activeLayer.undoStack.push(snap);
+        activeLayer.redoStack.clear();
+    }
+    public void undo() {
+        Layer active = layerManager.getActiveLayer();
+        if (active == null || active.undoStack.isEmpty()) return;
 
+        // Save current canvas to redo stack
+        WritableImage current = active.canvas.snapshot(null, null);
+        active.redoStack.push(current);
 
+        // Pop previous state from undo stack
+        WritableImage prev = active.undoStack.pop();
+        active.gc.clearRect(0, 0, active.canvas.getWidth(), active.canvas.getHeight());
+        active.gc.drawImage(prev, 0, 0);
+    }
+    public void redo() {
+        Layer active = layerManager.getActiveLayer();
+        if (active == null || active.redoStack.isEmpty()) return;
 
-//    private void saveState() {
-//        WritableImage snap = layerManager.getLayers().canvas.snapshot(new SnapshotParameters(), null);
-//        layerManager.getLayers().undo.push(snap);
-//        layerManager.getLayers().redo.clear();
-//    }
-//    private void undo() {
-//        if (layerManager.getActiveLayer().undo.isEmpty()) return;
-//        WritableImage current = layerManager.getActiveLayer().canvas.snapshot(null, null);
-//        layerManager.getActiveLayer().redo.push(current);
-//        WritableImage prev = layerManager.getActiveLayer().undo.pop();
-//        layerManager.getActiveLayer().gc.clearRect(0, 0, 900, 600);
-//        layerManager.getActiveLayer().gc.drawImage(prev, 0, 0);
-//    }
-//
-//    private void redo() {
-//        if (layerManager.getActiveLayer().redo.isEmpty()) return;
-//        WritableImage next = layerManager.getActiveLayer().redo.pop();
-//        saveState();
-//        layerManager.getActiveLayer().gc.clearRect(0, 0, 900, 600);
-//        layerManager.getActiveLayer().gc.drawImage(next, 0, 0);
-//    }
+        WritableImage next = active.redoStack.pop();
+
+        // Save current state for undo
+        WritableImage current = active.canvas.snapshot(null, null);
+        active.undoStack.push(current);
+
+        active.gc.clearRect(0, 0, active.canvas.getWidth(), active.canvas.getHeight());
+        active.gc.drawImage(next, 0, 0);
+    }
 
 }

@@ -13,17 +13,10 @@ public class LayerManager {
 
 
     private final List<Layer> layers = new ArrayList<>();
-    private Stack<WritableImage> undoStack = new Stack<>();
-    private Stack<WritableImage> redoStack = new Stack<>();
-
-
     private int layerNameCount = 0;
     private Layer activeLayer;
 
-    LadybugState state;
-
     public LayerManager(LadybugState state) {
-        this.state = state;
 
     }
 
@@ -31,15 +24,12 @@ public class LayerManager {
     public Layer getActiveLayer() {
         return activeLayer;
     }
-
     public void setActiveLayer(Layer activeLayer) {
         this.activeLayer = activeLayer;
     }
-
     public List<Layer> getLayers() {
         return layers;
     }
-
     public Layer createLayer() {
 
         Layer layer = new Layer(
@@ -58,7 +48,6 @@ public class LayerManager {
         activeLayer = layer;
         return layer;
     }
-
     public void removeLayer(Layer layer) {
 
         layers.remove(layer);

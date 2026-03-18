@@ -12,7 +12,8 @@ public class Layer {
     Canvas canvas;
     GraphicsContext gc;
     private String name;
-
+    public Stack<WritableImage> undoStack = new Stack<>();
+    public Stack<WritableImage> redoStack = new Stack<>();
 
     Layer( String name, double canvasWith, double canvasHeight) {
         this.name = name;

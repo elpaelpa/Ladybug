@@ -25,7 +25,7 @@ public class UIManager {
     private final ColorPicker picker = new ColorPicker();
 
     //Contains Tool Objects
-    public ToolManager toolManager;
+    private ToolManager toolManager;
     private ImageHandler imageHandler;
 
 
@@ -34,7 +34,7 @@ public class UIManager {
     private Layer strokeLayer;
 
     private final LadybugState state;
-    private  Stage currentStage;
+    private Stage currentStage;
     public UIManager(LadybugState state,Stage stage){
         this.state = state;
         this.currentStage = stage;
@@ -182,29 +182,24 @@ public class UIManager {
 //        ToggleButton bucket = createTool("Bucket", Tool.BUCKET, tools);
 //        ToggleButton eye = createTool("Eyedropper", Tool.EYEDROPPER, tools);
 
-        Button undoBtn = new Button("Undo");
-        Button redoBtn = new Button("Redo");
-        //undoBtn.setOnAction(e -> undo());
-//        redoBtn.setOnAction(e -> redo());
-
-
-
+        Button undoButton = new Button("Undo");
+        Button redoButton = new Button("Redo");
+        undoButton.setOnAction(e -> state.undo());
+        redoButton.setOnAction(e -> state.redo());
         Button export = new Button("Export PNG");
-//
         export.setOnAction(e -> {
             imageHandler.exportImage();
         });
 
+
+        bar.getChildren().add(new Button("Undo"));
+        bar.getChildren().add(new Button("Redo"));
         bar.getChildren().add(export);
-//        bar.getChildren().add(new Button("Undo"));
-//        bar.getChildren().add(new Button("Redo"));
 
 
 
         return bar;
     }
-
-
     private ToggleButton createToolButton(BaseTool tool, ToggleGroup group) {
 
         ToggleButton btn = new ToggleButton(tool.toolName);
@@ -223,14 +218,17 @@ public class UIManager {
             strokeLayer = state.layerManager.getActiveLayer();
             if(strokeLayer == null) return;
 
-            Point2D p = strokeLayer.getCanvas().sceneToLocal(e.getSceneX(), e.getSceneY());
+            state.saveState();
 
+            Point2D p = strokeLayer.getCanvas().sceneToLocal(e.getSceneX(), e.getSceneY());
             toolManager.getCurrentTool().startStroke(
                     strokeLayer,
                     p.getX(),
                     p.getY()
             );
         });
+
+
         canvasStack.setOnMouseDragged(e -> {
             if(strokeLayer == null) return;
             Point2D p = strokeLayer.getCanvas().sceneToLocal(e.getSceneX(), e.getSceneY());
