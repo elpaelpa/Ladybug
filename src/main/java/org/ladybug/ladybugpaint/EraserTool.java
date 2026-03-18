@@ -9,5 +9,20 @@ public class EraserTool extends BaseTool {
         super(name,canvasStackPane,toolManager);
     }
 
+    @Override
+    public void startStroke(Layer activeLayer, double x, double y) {
+
+    }
+
+    @Override
+    public void drawStroke(Layer activeLayer, double x, double y) {
+
+    }
+
+    @Override
+    public void endStroke(Layer activeLayer, double x, double y) {
+
+    }
+
 
 }
