@@ -5,4 +5,5 @@ module org.ladybug.ladybugpaint {
     requires java.desktop;
     opens org.ladybug.ladybugpaint to javafx.fxml;
     exports org.ladybug.ladybugpaint;
+
 }
