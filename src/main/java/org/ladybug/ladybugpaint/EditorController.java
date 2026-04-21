@@ -88,9 +88,11 @@ public class EditorController {
             stage.setScene(createEditor());
         });
 
+        // SWAPPED: newProject now comes before resBox
         VBox box = (logoView != null)
-                ? new VBox(20, logoView, title, resBox, newProject)
-                : new VBox(25, title, resBox, newProject);
+                ? new VBox(20, logoView, title, newProject, resBox)
+                : new VBox(25, title, newProject, resBox);
+
         box.setAlignment(Pos.CENTER);
         box.setPadding(new Insets(50, 0, 0, 0));
 
