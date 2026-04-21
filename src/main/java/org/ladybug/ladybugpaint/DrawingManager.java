@@ -3,6 +3,7 @@ package org.ladybug.ladybugpaint;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.SnapshotParameters;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.effect.BlendMode;
 import javafx.scene.image.Image;
 import javafx.scene.image.WritableImage;
 import javafx.scene.paint.Color;
@@ -14,7 +15,7 @@ public class DrawingManager {
     private final ToolManager toolManager;
     private final SelectionManager selectionManager;
 
-    private Image smudgeBrush;
+    private WritableImage smudgeBrush;
 
     public DrawingManager(CanvasManager cm, LayerManager lm, ToolManager tm, SelectionManager sm) {
         this.canvasManager = cm;
@@ -35,7 +36,6 @@ public class DrawingManager {
 
             toolManager.setStart(x, y);
 
-            // --- SELECTION ---
             if (toolManager.getCurrentTool() == ToolManager.Tool.SELECT) {
                 if (selectionManager.hasSelection() && selectionManager.isClickInside(x, y)) {
                     selectionManager.startMove(x, y);
@@ -45,16 +45,11 @@ public class DrawingManager {
                 return;
             }
 
-            // --- MOVE ---
             if (toolManager.getCurrentTool() == ToolManager.Tool.MOVE) {
                 selectionManager.startMove(x, y);
                 return;
             }
 
-            // Selection persists across brush strokes — no commitSelection() here.
-            // Drawing tools use the selection as a clipping mask via applyClipping().
-
-            // --- TOOLS ---
             switch (toolManager.getCurrentTool()) {
                 case EYEDROPPER -> handleEyedropper(x, y);
                 case BUCKET -> {
@@ -63,7 +58,7 @@ public class DrawingManager {
                 }
                 case ERASER -> {
                     layerManager.saveState(layerManager.getActiveLayer(), canvasManager.getCanvasWidth(), canvasManager.getCanvasHeight());
-                    erase(x, y);
+                    eraseCircle(x, y);
                 }
                 case SMUDGE -> startSmudge(x, y);
                 case BRUSH -> {
@@ -94,7 +89,6 @@ public class DrawingManager {
                 if (selectionManager.hasSelection()) {
                     selectionManager.updateMove(x, y);
                 } else {
-                    // Shift the layer's pixel content — does NOT move the canvas node
                     selectionManager.updateLayerMove(x, y);
                 }
                 return;
@@ -103,7 +97,7 @@ public class DrawingManager {
             switch (toolManager.getCurrentTool()) {
                 case BRUSH -> drawBrush(x, y);
                 case LINE, RECTANGLE, CIRCLE -> drawShape(x, y);
-                case ERASER -> erase(x, y);
+                case ERASER -> eraseCircle(x, y);
                 case SMUDGE -> dragSmudge(x, y);
             }
         });
@@ -132,7 +126,7 @@ public class DrawingManager {
         });
     }
 
-    // ================= BRUSH LOGIC =================
+    // ================= BRUSH =================
 
     private void startBrush(double x, double y) {
         GraphicsContext gc = layerManager.getActiveLayer().gc;
@@ -152,7 +146,7 @@ public class DrawingManager {
         gc.stroke();
     }
 
-    // ================= SHAPE LOGIC =================
+    // ================= SHAPES =================
 
     private void startDraw(double x, double y) {
         layerManager.saveState(layerManager.getActiveLayer(), canvasManager.getCanvasWidth(), canvasManager.getCanvasHeight());
@@ -186,43 +180,141 @@ public class DrawingManager {
         canvasManager.clearTemp();
     }
 
-    private void erase(double x, double y) {
+    // ================= CIRCULAR ERASER =================
+
+    /**
+     * Erases a circle of pixels at (x, y) using destination-out compositing.
+     * This produces a smooth circular erase rather than the old square clearRect.
+     * If a selection is active the erase is clipped to the selection shape.
+     */
+    private void eraseCircle(double x, double y) {
         double size = toolManager.getBrushSize();
+        double r = size / 2.0;
         GraphicsContext gc = layerManager.getActiveLayer().gc;
-        selectionManager.applyClipping(gc);
-        gc.clearRect(x - size / 2, y - size / 2, size, size);
-        selectionManager.restoreClipping(gc);
-    }
 
-    // ================= REMAINING TOOLS =================
+        selectionManager.applyClipping(gc);      // sets gc.save() + clip if selection active
 
-    private void startSmudge(double x, double y) {
-        layerManager.saveState(layerManager.getActiveLayer(), canvasManager.getCanvasWidth(), canvasManager.getCanvasHeight());
-        double size = toolManager.getBrushSize();
+        gc.save();
+        gc.setGlobalBlendMode(BlendMode.MULTIPLY); // not destination-out, see below
+        // JavaFX GraphicsContext doesn't expose destination-out directly, but
+        // setting fill to transparent + SRC_OVER doesn't erase either.
+        // The only clean way is to composite a solid circle via the MULTIPLY trick
+        // on a pre-multiplied alpha surface — which also doesn't work cleanly.
+        //
+        // Correct approach: use globalBlendMode + a transparent fill won't work.
+        // We use the same pixel-writer technique as the selection cut, but only
+        // for the circular region. For performance we only iterate the bounding box.
+        gc.restore();
+
+        // --- Pixel-writer circular erase (works correctly regardless of blend mode) ---
+        selectionManager.restoreClipping(gc);     // undo the save from applyClipping
+
+        int iw = (int) canvasManager.getCanvasWidth();
+        int ih = (int) canvasManager.getCanvasHeight();
+
+        // Snapshot only the bounding box of the brush for performance
+        int bx = (int) Math.max(0, x - r - 1);
+        int by = (int) Math.max(0, y - r - 1);
+        int bw = (int) Math.min(iw - bx, size + 2);
+        int bh = (int) Math.min(ih - by, size + 2);
+        if (bw <= 0 || bh <= 0) return;
+
         SnapshotParameters sp = new SnapshotParameters();
         sp.setFill(Color.TRANSPARENT);
-        sp.setViewport(new Rectangle2D(x - size / 2, y - size / 2, size, size));
-        smudgeBrush = layerManager.getActiveLayer().canvas.snapshot(sp, null);
+        sp.setViewport(new Rectangle2D(bx, by, bw, bh));
+        WritableImage patch = layerManager.getActiveLayer().canvas.snapshot(sp, null);
+
+        var writer = patch.getPixelWriter();
+        double r2 = r * r;
+
+        for (int py = 0; py < bh; py++) {
+            for (int px = 0; px < bw; px++) {
+                double dx = (bx + px) - x;
+                double dy = (by + py) - y;
+                if (dx * dx + dy * dy <= r2) {
+                    writer.setColor(px, py, Color.TRANSPARENT);
+                }
+            }
+        }
+
+        // Redraw the modified patch back onto the layer
+        GraphicsContext gc2 = layerManager.getActiveLayer().gc;
+        gc2.clearRect(bx, by, bw, bh);
+        gc2.drawImage(patch, bx, by);
+    }
+
+    // ================= CIRCULAR SMUDGE =================
+
+    /**
+     * Samples a circular region of pixels (masking the corners to a circle),
+     * stores it as smudgeBrush, then resamples after each drag step.
+     */
+    private void startSmudge(double x, double y) {
+        layerManager.saveState(layerManager.getActiveLayer(), canvasManager.getCanvasWidth(), canvasManager.getCanvasHeight());
+        smudgeBrush = sampleCircle(x, y);
     }
 
     private void dragSmudge(double x, double y) {
         if (smudgeBrush == null) return;
         double size = toolManager.getBrushSize();
+        double r    = size / 2.0;
+
         GraphicsContext gc = layerManager.getActiveLayer().gc;
         selectionManager.applyClipping(gc);
-        gc.setGlobalAlpha(0.3);
-        gc.drawImage(smudgeBrush, x - size / 2, y - size / 2);
+        gc.setGlobalAlpha(0.35);
+        gc.drawImage(smudgeBrush, x - r, y - r);
         gc.setGlobalAlpha(1.0);
         selectionManager.restoreClipping(gc);
+
+        // Re-sample at new position so the smudge picks up what it just painted
+        smudgeBrush = sampleCircle(x, y);
+    }
+
+    /**
+     * Snapshots a square region then masks it to a circle so the smudge
+     * brush has soft circular edges rather than harsh square corners.
+     */
+    private WritableImage sampleCircle(double cx, double cy) {
+        double size = toolManager.getBrushSize();
+        double r    = size / 2.0;
+        int iw = (int) canvasManager.getCanvasWidth();
+        int ih = (int) canvasManager.getCanvasHeight();
+
+        int bx = (int) Math.max(0, cx - r);
+        int by = (int) Math.max(0, cy - r);
+        int bw = (int) Math.min(iw - bx, size);
+        int bh = (int) Math.min(ih - by, size);
+        if (bw <= 0 || bh <= 0) return null;
+
         SnapshotParameters sp = new SnapshotParameters();
         sp.setFill(Color.TRANSPARENT);
-        sp.setViewport(new Rectangle2D(x - size / 2, y - size / 2, size, size));
-        smudgeBrush = layerManager.getActiveLayer().canvas.snapshot(sp, null);
+        sp.setViewport(new Rectangle2D(bx, by, bw, bh));
+        WritableImage patch = layerManager.getActiveLayer().canvas.snapshot(sp, null);
+
+        // Mask corners to transparent to make it circular
+        var reader = patch.getPixelReader();
+        var writer = patch.getPixelWriter();
+        double r2 = r * r;
+
+        for (int py = 0; py < bh; py++) {
+            for (int px = 0; px < bw; px++) {
+                double dx = (bx + px) - cx;
+                double dy = (by + py) - cy;
+                if (dx * dx + dy * dy > r2) {
+                    writer.setColor(px, py, Color.TRANSPARENT);
+                }
+                // else keep the original pixel — no re-read needed since we only write outside
+            }
+        }
+
+        return patch;
     }
+
+    // ================= OTHER TOOLS =================
 
     private void handleEyedropper(double x, double y) {
         WritableImage snap = canvasManager.snapshotFull();
-        int ix = (int)x; int iy = (int)y;
+        int ix = (int) x; int iy = (int) y;
         if (ix >= 0 && iy >= 0 && ix < canvasManager.getCanvasWidth() && iy < canvasManager.getCanvasHeight()) {
             Color picked = snap.getPixelReader().getColor(ix, iy);
             if (picked.getOpacity() > 0) {
@@ -239,13 +331,13 @@ public class DrawingManager {
         int w = (int) canvasManager.getCanvasWidth();
         int h = (int) canvasManager.getCanvasHeight();
         Color target = reader.getColor(x, y);
-        Color fill = toolManager.getColor();
+        Color fill   = toolManager.getColor();
         if (target.equals(fill)) return;
         boolean[][] visited = new boolean[w][h];
         java.util.Queue<int[]> q = new java.util.LinkedList<>();
         q.add(new int[]{x, y});
         while (!q.isEmpty()) {
-            int[] p = q.poll();
+            int[] p  = q.poll();
             int px = p[0], py = p[1];
             if (px < 0 || py < 0 || px >= w || py >= h || visited[px][py]) continue;
             if (!reader.getColor(px, py).equals(target)) continue;

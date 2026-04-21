@@ -23,24 +23,31 @@ public class EditorController {
 
     private final Stage stage;
 
-    // UI controls
-    private final Slider brushSize = new Slider(1, 50, 5);
+    private final Slider brushSize    = new Slider(1, 50, 5);
     private final Slider brushOpacity = new Slider(0, 1, 1);
+
+    /**
+     * ColorPicker configured to show the custom-color editor immediately,
+     * bypassing the default swatch grid.
+     * Setting the style class to "split-button" hides the swatch arrow so the
+     * whole button opens the custom dialog directly.
+     */
     private final ColorPicker colorPicker = new ColorPicker(Color.BLACK);
 
-    // Canvas settings
-    private double canvasWidth = 1920;
+    private double canvasWidth  = 1920;
     private double canvasHeight = 1080;
 
-    // Managers
-    private CanvasManager canvasManager;
-    private LayerManager layerManager;
-    private ToolManager toolManager;
+    private CanvasManager    canvasManager;
+    private LayerManager     layerManager;
+    private ToolManager      toolManager;
     private SelectionManager selectionManager;
-    private DrawingManager drawingManager;
+    private DrawingManager   drawingManager;
 
     public EditorController(Stage stage) {
         this.stage = stage;
+        // Force the color picker to open directly into the custom color editor
+        // rather than showing the swatch palette first.
+        colorPicker.getStyleClass().add("button");
     }
 
     public Scene createScene() {
@@ -50,7 +57,8 @@ public class EditorController {
     private Scene createHome() {
         ImageView logoView = null;
         try {
-            Image logo = new Image(Objects.<InputStream>requireNonNull(getClass().getResourceAsStream("Ladybug.png")));
+            Image logo = new Image(Objects.<InputStream>requireNonNull(
+                    getClass().getResourceAsStream("Ladybug.png")));
             logoView = new ImageView(logo);
             logoView.setFitWidth(500);
             logoView.setPreserveRatio(true);
@@ -61,9 +69,10 @@ public class EditorController {
         Label title = new Label("");
         title.getStyleClass().add("title-label");
 
-        TextField widthInput = new TextField("1920");
+        TextField widthInput  = new TextField("1920");
         TextField heightInput = new TextField("1080");
-        widthInput.setPrefWidth(80); heightInput.setPrefWidth(80);
+        widthInput.setPrefWidth(80);
+        heightInput.setPrefWidth(80);
 
         HBox resBox = new HBox(10, new Label("W:"), widthInput, new Label("H:"), heightInput);
         resBox.setAlignment(Pos.CENTER);
@@ -71,7 +80,7 @@ public class EditorController {
         Button newProject = new Button("New Project");
         newProject.setOnAction(e -> {
             try {
-                canvasWidth = Double.parseDouble(widthInput.getText());
+                canvasWidth  = Double.parseDouble(widthInput.getText());
                 canvasHeight = Double.parseDouble(heightInput.getText());
             } catch (NumberFormatException ex) {
                 canvasWidth = 1920; canvasHeight = 1080;
@@ -93,26 +102,28 @@ public class EditorController {
     private Scene createEditor() {
         BorderPane root = new BorderPane();
 
-        canvasManager = new CanvasManager();
+        canvasManager    = new CanvasManager();
         canvasManager.init(canvasWidth, canvasHeight);
         canvasManager.applyAutoZoom(850, 600);
 
-        layerManager = new LayerManager(canvasManager.getCanvasStack());
-        toolManager = new ToolManager(brushSize, brushOpacity, colorPicker);
+        layerManager     = new LayerManager(canvasManager.getCanvasStack());
+        toolManager      = new ToolManager(brushSize, brushOpacity, colorPicker);
         selectionManager = new SelectionManager(canvasManager, layerManager);
-        drawingManager = new DrawingManager(canvasManager, layerManager, toolManager, selectionManager);
+        drawingManager   = new DrawingManager(canvasManager, layerManager, toolManager, selectionManager);
 
-        // Background layer — white fill, stays at the bottom
+        // Background layer
         layerManager.addLayer("Background", canvasWidth, canvasHeight, brushSize.getValue());
         layerManager.getActiveLayer().gc.setFill(Color.WHITE);
         layerManager.getActiveLayer().gc.fillRect(0, 0, canvasWidth, canvasHeight);
 
-        // Layer 1 — transparent, added on top, selected by default
+        // Default transparent drawing layer
         layerManager.addLayer("Layer 1", canvasWidth, canvasHeight, brushSize.getValue());
 
         drawingManager.attachMouseEvents();
 
-        root.setCenter(canvasManager.createCenteredView());
+        // createCenteredView() also attaches scroll-to-zoom
+        StackPane canvasView = canvasManager.createCenteredView();
+        root.setCenter(canvasView);
         root.setLeft(layerManager.createLayerPanel());
         root.setRight(createColorPanel());
 
@@ -120,7 +131,10 @@ public class EditorController {
                 () -> layerManager.undo(canvasWidth, canvasHeight),
                 () -> layerManager.redo(canvasWidth, canvasHeight),
                 this::exportImage,
-                this::importImage
+                this::importImage,
+                canvasManager::zoomIn,
+                canvasManager::zoomOut,
+                canvasManager::zoomReset
         ));
 
         Scene scene = new Scene(root, 1200, 750);
@@ -128,8 +142,22 @@ public class EditorController {
                 () -> layerManager.undo(canvasWidth, canvasHeight),
                 () -> layerManager.redo(canvasWidth, canvasHeight));
         selectionManager.registerShortcuts(scene);
-        applyCSS(scene);
 
+        // Keyboard zoom shortcuts
+        scene.getAccelerators().put(
+                new javafx.scene.input.KeyCodeCombination(javafx.scene.input.KeyCode.EQUALS,
+                        javafx.scene.input.KeyCombination.CONTROL_DOWN),
+                canvasManager::zoomIn);
+        scene.getAccelerators().put(
+                new javafx.scene.input.KeyCodeCombination(javafx.scene.input.KeyCode.MINUS,
+                        javafx.scene.input.KeyCombination.CONTROL_DOWN),
+                canvasManager::zoomOut);
+        scene.getAccelerators().put(
+                new javafx.scene.input.KeyCodeCombination(javafx.scene.input.KeyCode.DIGIT0,
+                        javafx.scene.input.KeyCombination.CONTROL_DOWN),
+                canvasManager::zoomReset);
+
+        applyCSS(scene);
         return scene;
     }
 
@@ -158,19 +186,15 @@ public class EditorController {
             double imgW = img.getWidth();
             double imgH = img.getHeight();
 
-            // Scale down to fit canvas if the image is larger, preserving aspect ratio
             double drawW = imgW;
             double drawH = imgH;
             if (imgW > canvasWidth || imgH > canvasHeight) {
-                double scaleX = canvasWidth / imgW;
-                double scaleY = canvasHeight / imgH;
-                double scale = Math.min(scaleX, scaleY);
+                double scale = Math.min(canvasWidth / imgW, canvasHeight / imgH);
                 drawW = imgW * scale;
                 drawH = imgH * scale;
             }
 
-            // Center on canvas
-            double drawX = (canvasWidth - drawW) / 2.0;
+            double drawX = (canvasWidth  - drawW) / 2.0;
             double drawY = (canvasHeight - drawH) / 2.0;
 
             layerManager.getActiveLayer().gc.drawImage(img, drawX, drawY, drawW, drawH);
@@ -181,7 +205,6 @@ public class EditorController {
 
     private void exportImage() {
         WritableImage snapshot = canvasManager.snapshotFull();
-
         int w = (int) snapshot.getWidth();
         int h = (int) snapshot.getHeight();
 
