@@ -8,8 +8,6 @@ import javafx.scene.paint.Color;
 
 public class ToolManager {
 
-
-
     // ================= TOOL ENUM =================
     public enum Tool {
         BRUSH, ERASER, SMUDGE, LINE, RECTANGLE, CIRCLE, BUCKET, EYEDROPPER, SELECT, MOVE
@@ -61,101 +59,107 @@ public class ToolManager {
     }
 
     // ================= TOOLBAR =================
-    public HBox createToolbar(Runnable undoAction, Runnable redoAction, Runnable exportAction) {
+    public HBox createToolbar(Runnable undoAction, Runnable redoAction, Runnable exportAction, Runnable importAction) {
 
         ToggleGroup tools = new ToggleGroup();
 
-        brushBtn = createTool("Brush", Tool.BRUSH, tools);
-        eraserBtn = createTool("Eraser", Tool.ERASER, tools);
-        smudgeBtn = createTool("Smudge", Tool.SMUDGE, tools);
-        lineBtn = createTool("Line", Tool.LINE, tools);
-        rectBtn = createTool("Rectangle", Tool.RECTANGLE, tools);
-        circleBtn = createTool("Circle", Tool.CIRCLE, tools);
-        bucketBtn = createTool("Bucket", Tool.BUCKET, tools);
-        eyeBtn = createTool("Eyedropper", Tool.EYEDROPPER, tools);
-        selectBtn = createTool("Select", Tool.SELECT, tools);
-        moveBtn = createTool("Move", Tool.MOVE, tools);
+        brushBtn    = createTool("Brush",       Tool.BRUSH,       tools);
+        eraserBtn   = createTool("Eraser",      Tool.ERASER,      tools);
+        smudgeBtn   = createTool("Smudge",      Tool.SMUDGE,      tools);
+        lineBtn     = createTool("Line",        Tool.LINE,        tools);
+        rectBtn     = createTool("Rectangle",   Tool.RECTANGLE,   tools);
+        circleBtn   = createTool("Circle",      Tool.CIRCLE,      tools);
+        bucketBtn   = createTool("Bucket",      Tool.BUCKET,      tools);
+        eyeBtn      = createTool("Eyedropper",  Tool.EYEDROPPER,  tools);
+        moveBtn     = createTool("Move",        Tool.MOVE,        tools);
 
-        Button undoBtn = new Button("Undo");
-        Button redoBtn = new Button("Redo");
+        // Select button toggles: pressing it again while already selected will deselect
+        selectBtn = new ToggleButton("Select");
+        selectBtn.setToggleGroup(tools);
+        selectBtn.setOnAction(e -> {
+            if (currentTool == Tool.SELECT && !selectBtn.isSelected()) {
+                // Second press — fall back to brush; the deselect action (clearSelection)
+                // is triggered via the D accelerator or by starting a new selection drag.
+                currentTool = Tool.BRUSH;
+                brushBtn.setSelected(true);
+            } else {
+                currentTool = Tool.SELECT;
+            }
+        });
+
+        Button importBtn = new Button("Import Photo");
+        Button undoBtn   = new Button("Undo");
+        Button redoBtn   = new Button("Redo");
         Button exportBtn = new Button("Export PNG");
 
+        importBtn.setOnAction(e -> importAction.run());
         undoBtn.setOnAction(e -> undoAction.run());
         redoBtn.setOnAction(e -> redoAction.run());
         exportBtn.setOnAction(e -> exportAction.run());
 
         return new HBox(8,
-                selectBtn, moveBtn,
                 brushBtn, eraserBtn, smudgeBtn,
                 lineBtn, rectBtn, circleBtn,
                 bucketBtn, eyeBtn,
-                undoBtn, redoBtn, exportBtn
+                selectBtn, moveBtn,
+                new Separator(javafx.geometry.Orientation.VERTICAL),
+                importBtn, undoBtn, redoBtn, exportBtn
         );
     }
 
     private ToggleButton createTool(String name, Tool tool, ToggleGroup group) {
         ToggleButton btn = new ToggleButton(name);
         btn.setToggleGroup(group);
-
         if (tool == Tool.BRUSH) btn.setSelected(true);
-
         btn.setOnAction(e -> currentTool = tool);
-
         return btn;
     }
 
     // ================= SHORTCUTS =================
     public void registerShortcuts(Scene scene, Runnable undoAction, Runnable redoAction) {
-
         scene.setOnKeyPressed(e -> {
             if (e.getCode() == KeyCode.I) {
                 currentTool = Tool.EYEDROPPER;
                 eyeBtn.setSelected(true);
-            }
-            else if (e.getCode() == KeyCode.B) {
+            } else if (e.getCode() == KeyCode.B) {
                 currentTool = Tool.BRUSH;
                 brushBtn.setSelected(true);
-            }
-            else if (e.getCode() == KeyCode.E) {
+            } else if (e.getCode() == KeyCode.E) {
                 currentTool = Tool.ERASER;
                 eraserBtn.setSelected(true);
-            }
-            else if (e.getCode() == KeyCode.S) {
+            } else if (e.getCode() == KeyCode.S) {
                 currentTool = Tool.SMUDGE;
                 smudgeBtn.setSelected(true);
-            }
-            else if (e.getCode() == KeyCode.Z) {
+            } else if (e.getCode() == KeyCode.Z) {
                 if (e.isShiftDown()) redoAction.run();
                 else undoAction.run();
-            }
-            else if (e.getCode() == KeyCode.V) {
+            } else if (e.getCode() == KeyCode.V) {
                 currentTool = Tool.MOVE;
                 moveBtn.setSelected(true);
-            }
-            else if (e.getCode() == KeyCode.M) {
+            } else if (e.getCode() == KeyCode.M) {
                 currentTool = Tool.SELECT;
                 selectBtn.setSelected(true);
             }
         });
     }
+
     public void setColor(javafx.scene.paint.Color color) {
         colorPicker.setValue(color);
     }
+
     public void setTool(Tool tool) {
         this.currentTool = tool;
-
-        // Sync UI buttons
         switch (tool) {
-            case BRUSH -> brushBtn.setSelected(true);
-            case ERASER -> eraserBtn.setSelected(true);
-            case SMUDGE -> smudgeBtn.setSelected(true);
-            case LINE -> lineBtn.setSelected(true);
-            case RECTANGLE -> rectBtn.setSelected(true);
-            case CIRCLE -> circleBtn.setSelected(true);
-            case BUCKET -> bucketBtn.setSelected(true);
-            case EYEDROPPER -> eyeBtn.setSelected(true);
-            case SELECT -> selectBtn.setSelected(true);
-            case MOVE -> moveBtn.setSelected(true);
+            case BRUSH       -> brushBtn.setSelected(true);
+            case ERASER      -> eraserBtn.setSelected(true);
+            case SMUDGE      -> smudgeBtn.setSelected(true);
+            case LINE        -> lineBtn.setSelected(true);
+            case RECTANGLE   -> rectBtn.setSelected(true);
+            case CIRCLE      -> circleBtn.setSelected(true);
+            case BUCKET      -> bucketBtn.setSelected(true);
+            case EYEDROPPER  -> eyeBtn.setSelected(true);
+            case SELECT      -> selectBtn.setSelected(true);
+            case MOVE        -> moveBtn.setSelected(true);
         }
     }
 }
