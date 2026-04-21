@@ -13,120 +13,96 @@ import javafx.scene.transform.Scale;
 
 public class CanvasManager {
 
-    // ================= CORE =================
     private final StackPane canvasStack = new StackPane();
-
     private Canvas tempCanvas;
     private GraphicsContext tempGc;
-
     private double canvasWidth;
     private double canvasHeight;
     private double zoomFactor = 1.0;
-
-    // ================= INIT =================
+    public Canvas getTempCanvas() {
+        return tempCanvas;
+    }
     public void init(double width, double height) {
         this.canvasWidth = width;
         this.canvasHeight = height;
-
         tempCanvas = new Canvas(width, height);
         tempGc = tempCanvas.getGraphicsContext2D();
-
         tempCanvas.setMouseTransparent(true);
-
         canvasStack.getChildren().add(tempCanvas);
-
-        // 🔥 FIX: always keep temp canvas on top
         tempCanvas.toFront();
     }
 
-    // ================= ZOOM =================
     public void applyAutoZoom(double availableW, double availableH) {
         zoomFactor = Math.min(availableW / canvasWidth, availableH / canvasHeight);
         if (zoomFactor > 1.0) zoomFactor = 1.0;
-
         canvasStack.getTransforms().clear();
         canvasStack.getTransforms().add(new Scale(zoomFactor, zoomFactor));
-
         canvasStack.setAlignment(Pos.CENTER);
         canvasStack.setPickOnBounds(false);
     }
 
-    public double getZoomFactor() {
-        return zoomFactor;
-    }
+    public StackPane getCanvasStack() { return canvasStack; }
+    public GraphicsContext getTempGc() { return tempGc; }
+    public double getCanvasWidth() { return canvasWidth; }
+    public double getCanvasHeight() { return canvasHeight; }
 
-    // ================= GETTERS =================
-    public StackPane getCanvasStack() {
-        return canvasStack;
-    }
-
-    public Canvas getTempCanvas() {
-        return tempCanvas;
-    }
-
-    public GraphicsContext getTempGc() {
-        return tempGc;
-    }
-
-    public double getCanvasWidth() {
-        return canvasWidth;
-    }
-
-    public double getCanvasHeight() {
-        return canvasHeight;
-    }
-
-    // ================= LAYER MANAGEMENT =================
     public void addLayerCanvas(Canvas canvas) {
         canvasStack.getChildren().add(canvas);
-
-        // 🔥 CRITICAL: keep temp canvas above all layers
         tempCanvas.toFront();
     }
 
     public void removeLayerCanvas(Canvas canvas) {
         canvasStack.getChildren().remove(canvas);
-
-        // 🔥 Safety: keep temp canvas on top even after removal
         tempCanvas.toFront();
     }
 
-    // ================= SNAPSHOT =================
-    public WritableImage snapshot(Node node) {
-        SnapshotParameters sp = new SnapshotParameters();
-        sp.setFill(Color.TRANSPARENT);
-        sp.setTransform(new Scale(1, 1)); // ignore zoom
-
-        int w = (int) node.getBoundsInLocal().getWidth();
-        int h = (int) node.getBoundsInLocal().getHeight();
-
-        WritableImage snap = new WritableImage(w, h);
-        return node.snapshot(sp, snap);
-    }
-
     public WritableImage snapshotFull() {
+        // Hide the temporary preview and the path lines before snapping
+        boolean tempVis = tempCanvas.isVisible();
+        tempCanvas.setVisible(false);
+
+        // Find the selection path if it exists and hide it too
+        Node selPath = canvasStack.getChildren().stream()
+                .filter(n -> n instanceof javafx.scene.shape.Path)
+                .findFirst().orElse(null);
+        boolean pathVis = false;
+        if (selPath != null) {
+            pathVis = selPath.isVisible();
+            selPath.setVisible(false);
+        }
+
         SnapshotParameters sp = new SnapshotParameters();
         sp.setFill(Color.TRANSPARENT);
         sp.setTransform(new Scale(1 / zoomFactor, 1 / zoomFactor));
 
         WritableImage snap = new WritableImage((int) canvasWidth, (int) canvasHeight);
-        return canvasStack.snapshot(sp, snap);
+        WritableImage result = canvasStack.snapshot(sp, snap);
+
+        // Restore visibility
+        tempCanvas.setVisible(tempVis);
+        if (selPath != null) selPath.setVisible(pathVis);
+
+        return result;
     }
 
-    // ================= TEMP CANVAS =================
     public void clearTemp() {
         tempGc.clearRect(0, 0, canvasWidth, canvasHeight);
     }
 
     public void setTempOpacity(double opacity) {
         tempCanvas.setOpacity(opacity);
-
-        // 🔥 EXTRA SAFETY: ensure visibility every time it's used
         tempCanvas.toFront();
     }
 
-    // ================= VIEW WRAPPER =================
     public StackPane createCenteredView() {
         return new StackPane(new Group(canvasStack));
+    }
+
+    public WritableImage snapshot(Node node) {
+        SnapshotParameters sp = new SnapshotParameters();
+        sp.setFill(Color.TRANSPARENT);
+        int w = (int) node.getBoundsInLocal().getWidth();
+        int h = (int) node.getBoundsInLocal().getHeight();
+        return node.snapshot(sp, new WritableImage(w, h));
     }
 }
