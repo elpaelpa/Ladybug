@@ -1,102 +1,330 @@
-/* ========================================
-   Ladybug Paint Pro - Modern Dark Theme
-   ======================================== */
+/* ================================================================
+   Ladybug Paint — Modern Dark Theme
+   Design: refined industrial dark with warm rose accents
+   ================================================================ */
 
-/* Global Application Styling (A soft, slate dark gray) */
+/* ================================================================
+   ROOT
+   ================================================================ */
 .root {
-    -fx-background-color: #2b2b36;
-    -fx-font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-    -fx-font-size: 14px;
+    -fx-background-color: #1a1a1f;
+    -fx-font-family: 'Segoe UI', 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    -fx-font-size: 13px;
+    -fx-text-fill: #e0ddd8;
 }
 
-/* Text Styling */
+/* ================================================================
+   LABELS
+   ================================================================ */
 .label {
-    -fx-text-fill: #e2e2e2;
-    -fx-font-weight: bold;
+    -fx-text-fill: #908d88;
+    -fx-font-size: 12px;
 }
 
-/* Standard Buttons & Toolbar Tools */
-.button, .toggle-button {
-    -fx-background-color: #3f3f4e;
-    -fx-text-fill: #ffffff;
-    -fx-background-radius: 8px;
-    -fx-border-radius: 8px;
-    -fx-padding: 8px 14px;
+.title-label {
+    -fx-font-size: 30px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #e8e5e0;
+    -fx-letter-spacing: 0.02em;
+}
+
+.section-header {
+    -fx-font-size: 10px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #504d58;
+    -fx-letter-spacing: 0.12em;
+}
+
+/* ================================================================
+   BUTTONS
+   ================================================================ */
+.button {
+    -fx-background-color: #26252d;
+    -fx-text-fill: #c8c5c0;
+    -fx-font-size: 12px;
+    -fx-font-weight: 500;
+    -fx-padding: 7 13 7 13;
+    -fx-background-radius: 6;
+    -fx-border-color: #383640;
+    -fx-border-width: 1;
+    -fx-border-radius: 6;
     -fx-cursor: hand;
-    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.15), 4, 0, 0, 2);
 }
 
-/* Button Hover State */
-.button:hover, .toggle-button:hover {
-    -fx-background-color: #4f4f62;
+.button:hover {
+    -fx-background-color: #2e2d38;
+    -fx-border-color: #4e4c58;
+    -fx-text-fill: #ede8e3;
 }
 
-/* Button Pressed & Active Tool State (The Pink!) */
-.button:pressed, .toggle-button:selected, .toggle-button:pressed {
-    -fx-background-color: #ff6b81;
-    -fx-text-fill: #ffffff;
-    -fx-effect: none;
-    -fx-translate-y: 1px;
+.button:pressed {
+    -fx-background-color: #f4c2c8;
+    -fx-text-fill: #3a1a20;
+    -fx-border-color: #e0a0a8;
 }
 
-/* Specialized Delete Button (Slightly Redder) */
-.delete-button {
-    -fx-background-color: #4a2b2e;
-    -fx-text-fill: #ff9999;
-}
-.delete-button:hover {
-    -fx-background-color: #63363b;
+/* ================================================================
+   TOGGLE BUTTONS
+   ================================================================ */
+.toggle-button {
+    -fx-background-color: #222228;
+    -fx-text-fill: #a8a5a0;
+    -fx-font-size: 12px;
+    -fx-font-weight: 500;
+    -fx-padding: 7 11 7 11;
+    -fx-background-radius: 6;
+    -fx-border-color: #343240;
+    -fx-border-width: 1;
+    -fx-border-radius: 6;
+    -fx-cursor: hand;
 }
 
-/* Modern Pink Sliders */
+.toggle-button:hover {
+    -fx-background-color: #2a2932;
+    -fx-text-fill: #ddd8d3;
+    -fx-border-color: #484660;
+}
+
+.toggle-button:selected {
+    -fx-background-color: #b86070;
+    -fx-text-fill: #fff0f2;
+    -fx-border-color: #904858;
+    -fx-font-weight: 600;
+    -fx-effect: dropshadow(gaussian, rgba(184,96,112,0.35), 6, 0, 0, 1);
+}
+
+.toggle-button:pressed {
+    -fx-background-color: #f4c2c8;
+    -fx-text-fill: #3a1a20;
+    -fx-border-color: #e0a0a8;
+}
+
+/* ================================================================
+   SEPARATOR
+   ================================================================ */
+.separator .line {
+    -fx-border-color: #2e2c38;
+    -fx-border-width: 1;
+}
+
+/* ================================================================
+   SLIDERS
+   ================================================================ */
 .slider .track {
-    -fx-background-color: #3f3f4e;
-    -fx-background-radius: 5px;
+    -fx-background-color: #2c2a36;
+    -fx-background-radius: 3;
+    -fx-pref-height: 4;
 }
 
 .slider .thumb {
-    -fx-background-color: #ff6b81;
-    -fx-background-radius: 10px;
-    -fx-padding: 8px; /* Slightly adjusted for better scale */
+    -fx-background-color: #b86070;
+    -fx-background-radius: 50%;
+    -fx-pref-width: 13;
+    -fx-pref-height: 13;
+    -fx-effect: dropshadow(gaussian, rgba(184,96,112,0.4), 6, 0, 0, 0);
 }
 
-/* Layer Panel (ListView) Styling */
-.list-view {
-    -fx-background-color: #202028;
-    -fx-background-radius: 8px;
-    -fx-border-color: #3f3f4e;
-    -fx-border-radius: 8px;
-    -fx-padding: 4px;
+.slider .thumb:hover {
+    -fx-background-color: #c87080;
 }
 
-.list-cell {
-    -fx-background-color: transparent;
-    -fx-text-fill: #e2e2e2;
-    -fx-padding: 8px;
-    -fx-background-radius: 6px;
+.slider .thumb:pressed {
+    -fx-background-color: #f4c2c8;
 }
 
-.list-cell:empty {
-    -fx-background-color: transparent;
+.slider:focused .track {
+    -fx-border-color: transparent;
 }
 
-.list-cell:selected {
-    -fx-background-color: #ff6b81;
-    -fx-text-fill: #ffffff;
-}
-
-/* Color Picker Styling */
+/* ================================================================
+   COLOR PICKER
+   ================================================================ */
 .color-picker {
-    -fx-background-color: #3f3f4e;
-    -fx-background-radius: 8px;
+    -fx-background-color: #26252d;
+    -fx-text-fill: #c8c5c0;
+    -fx-border-color: #383640;
+    -fx-border-width: 1;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-padding: 6 10 6 10;
+    -fx-max-width: Infinity;
 }
 
-/* Canvas Area Container */
-.scroll-pane {
-    -fx-background-color: #1e1e24;
-    -fx-border-color: #1e1e24;
+.color-picker:hover {
+    -fx-background-color: #2e2d38;
+    -fx-border-color: #4e4c58;
 }
 
-.scroll-pane > .viewport {
-    -fx-background-color: #1e1e24;
+.color-picker .arrow-button {
+    -fx-background-color: transparent;
+}
+
+/* ================================================================
+   LIST VIEW
+   ================================================================ */
+.list-view {
+    -fx-background-color: #1c1c22;
+    -fx-border-color: #2c2a36;
+    -fx-border-width: 1;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-pref-height: 170;
+}
+
+.list-view .list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: #a0a0a0;
+    -fx-font-size: 12px;
+    -fx-padding: 6 10 6 10;
+}
+
+.list-view .list-cell:hover {
+    -fx-background-color: #26252d;
+    -fx-text-fill: #ddd8d3;
+}
+
+.list-view .list-cell:selected {
+    -fx-background-color: #38202a;
+    -fx-text-fill: #e898a8;
+    -fx-font-weight: 500;
+}
+
+/* ================================================================
+   TEXT FIELDS
+   ================================================================ */
+.text-field {
+    -fx-background-color: #1c1c22;
+    -fx-text-fill: #c8c5c0;
+    -fx-prompt-text-fill: #504d58;
+    -fx-border-color: #383640;
+    -fx-border-width: 1;
+    -fx-border-radius: 5;
+    -fx-background-radius: 5;
+    -fx-padding: 7 10 7 10;
+    -fx-font-size: 12px;
+}
+
+.text-field:focused {
+    -fx-border-color: #b86070;
+    -fx-effect: dropshadow(gaussian, rgba(184,96,112,0.22), 6, 0, 0, 0);
+}
+
+/* ================================================================
+   PANELS
+   ================================================================ */
+VBox {
+    -fx-background-color: #1c1c22;
+}
+
+/* ================================================================
+   RADIO BUTTONS
+   ================================================================ */
+.radio-button {
+    -fx-text-fill: #a0a0a0;
+    -fx-font-size: 12px;
+}
+
+.radio-button:hover {
+    -fx-text-fill: #ddd8d3;
+}
+
+.radio-button .radio {
+    -fx-background-color: #26252d;
+    -fx-border-color: #383640;
+    -fx-border-width: 1.5;
+    -fx-border-radius: 50%;
+    -fx-background-radius: 50%;
+}
+
+.radio-button:selected .radio {
+    -fx-background-color: #b86070;
+    -fx-border-color: #904858;
+}
+
+.radio-button:selected .dot {
+    -fx-background-color: white;
+    -fx-background-radius: 50%;
+}
+
+/* ================================================================
+   CHECK BOXES
+   ================================================================ */
+.check-box {
+    -fx-text-fill: #a0a0a0;
+    -fx-font-size: 12px;
+}
+
+.check-box:hover {
+    -fx-text-fill: #ddd8d3;
+}
+
+.check-box .box {
+    -fx-background-color: #26252d;
+    -fx-border-color: #383640;
+    -fx-border-width: 1.5;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+    -fx-pref-width: 15;
+    -fx-pref-height: 15;
+}
+
+.check-box:selected .box {
+    -fx-background-color: #b86070;
+    -fx-border-color: #904858;
+}
+
+.check-box:selected .mark {
+    -fx-background-color: white;
+}
+
+/* ================================================================
+   DELETE BUTTON
+   ================================================================ */
+.delete-button {
+    -fx-background-color: #2e1c1c;
+    -fx-text-fill: #d07070;
+    -fx-border-color: #4a2828;
+}
+
+.delete-button:hover {
+    -fx-background-color: #3a2020;
+    -fx-text-fill: #e88080;
+    -fx-border-color: #603030;
+}
+
+.delete-button:pressed {
+    -fx-background-color: #f4c2c2;
+    -fx-text-fill: #3a1010;
+}
+
+/* ================================================================
+   SCROLL BARS
+   ================================================================ */
+.scroll-bar {
+    -fx-background-color: #1c1c22;
+}
+
+.scroll-bar .thumb {
+    -fx-background-color: #38363e;
+    -fx-background-radius: 4;
+}
+
+.scroll-bar .thumb:hover {
+    -fx-background-color: #4e4c58;
+}
+
+.scroll-bar .increment-button,
+.scroll-bar .decrement-button {
+    -fx-background-color: transparent;
+    -fx-padding: 2;
+}
+
+/* ================================================================
+   BOTTOM BAR
+   ================================================================ */
+.bottom-bar {
+    -fx-background-color: #18181e;
+    -fx-border-color: #2c2a36 transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+    -fx-padding: 8 12 8 12;
 }

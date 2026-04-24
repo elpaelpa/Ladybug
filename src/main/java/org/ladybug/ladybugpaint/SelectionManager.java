@@ -7,7 +7,6 @@ import javafx.scene.Scene;
 import javafx.scene.SnapshotParameters;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
-import javafx.scene.image.Image;
 import javafx.scene.image.WritableImage;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
@@ -20,160 +19,405 @@ import java.util.List;
 
 public class SelectionManager {
 
+    // ================= FIELDS =================
+
+    // Provides access to the canvas stack, temp surface, and zoom
     private final CanvasManager canvasManager;
+
+    // Provides access to the active layer and undo/redo history
     private final LayerManager layerManager;
 
+    // The marching-ants path drawn on top of the canvas stack
     private final Path selectionPath = new Path();
-    private final List<Point2D> points = new ArrayList<>();
 
+    // Ordered list of canvas points defining the selection boundary
+    private final List<Point2D> selectionPoints = new ArrayList<>();
+
+    // Pixels captured inside the selection boundary for move/paste
     private WritableImage selectionImage = null;
+
+    // Image held on the internal clipboard for copy/paste
     private WritableImage clipboardImage = null;
 
-    // Snapshot of the layer AFTER the selection has been cut out.
-    // Used as the base to redraw on every drag update so the floating
-    // piece appears to move without leaving a trail.
+    // Snapshot of the layer after the selection pixels have been cut out;
+    // restored as the base on every drag frame so the floating piece moves cleanly
     private WritableImage layerAfterCut = null;
 
-    // Snapshot taken at drag-start for whole-layer move
+    // Snapshot of the full layer taken at the start of a whole-layer move
     private WritableImage layerMoveSnapshot = null;
-    private double layerMoveDragStartX, layerMoveDragStartY;
 
+    // Canvas X position where a whole-layer move drag started
+    private double layerMoveDragStartX = 0;
+
+    // Canvas Y position where a whole-layer move drag started
+    private double layerMoveDragStartY = 0;
+
+    // True when a selection region is currently active
     private boolean hasSelection = false;
-    private boolean dragging = false;
-    private boolean creatingNewSelection = false;
-    private boolean selectionCut = false;
 
-    private double selX, selY, selW, selH;
-    private double offsetX, offsetY;
-    private double dashOffset = 0;
+    // True while the user is dragging a selection or layer
+    private boolean isDragging = false;
 
-    public SelectionManager(CanvasManager cm, LayerManager lm) {
-        this.canvasManager = cm;
-        this.layerManager = lm;
+    // True while the user is drawing a new selection boundary
+    private boolean isCreatingNewSelection = false;
+
+    // True once the selected pixels have been cut from the active layer
+    private boolean selectionHasBeenCut = false;
+
+    // When true the select tool uses an axis-aligned rectangle; otherwise freeform lasso
+    private boolean rectangleModeEnabled = false;
+
+    // Canvas X of the top-left corner of the selection bounding box
+    private double selectionX = 0;
+
+    // Canvas Y of the top-left corner of the selection bounding box
+    private double selectionY = 0;
+
+    // Width of the selection bounding box in canvas pixels
+    private double selectionWidth = 0;
+
+    // Height of the selection bounding box in canvas pixels
+    private double selectionHeight = 0;
+
+    // Offset from drag start to the selection origin, used during move
+    private double dragOffsetX = 0;
+
+    // Offset from drag start to the selection origin, used during move
+    private double dragOffsetY = 0;
+
+    // Animated dash offset that drives the marching-ants effect
+    private double marchingAntsDashOffset = 0;
+
+    // ================= CONSTRUCTOR =================
+
+    /**
+     * Constructs the SelectionManager and adds the selection path overlay to the canvas stack.
+     *
+     * @param canvasManager the canvas manager; must not be null
+     * @param layerManager  the layer manager; must not be null
+     */
+    public SelectionManager(CanvasManager canvasManager, LayerManager layerManager) {
+        if (canvasManager != null) {
+            this.canvasManager = canvasManager;
+        } else {
+            this.canvasManager = null;
+        }
+
+        if (layerManager != null) {
+            this.layerManager = layerManager;
+        } else {
+            this.layerManager = null;
+        }
+
         setupSelectionPath();
         setupMarchingAnts();
     }
 
+    // ================= GETTERS / SETTERS =================
+
+    /**
+     * Returns true when a selection region is currently active.
+     */
+    public boolean hasSelection() {
+        return hasSelection;
+    }
+
+    /**
+     * Returns true while the user is drawing a new selection boundary.
+     */
+    public boolean isCreatingNewSelection() {
+        return isCreatingNewSelection;
+    }
+
+    /**
+     * Returns true when the select tool is in rectangle mode.
+     */
+    public boolean isRectangleModeEnabled() {
+        return rectangleModeEnabled;
+    }
+
+    /**
+     * Enables or disables rectangle selection mode.
+     *
+     * @param newRectangleModeEnabled true for rectangle, false for freeform lasso
+     */
+    public void setRectangleModeEnabled(boolean newRectangleModeEnabled) {
+        this.rectangleModeEnabled = newRectangleModeEnabled;
+    }
+
+    // ================= SETUP =================
+
+    /**
+     * Configures the selection path overlay and adds it to the canvas stack.
+     */
     private void setupSelectionPath() {
         selectionPath.setStroke(Color.WHITE);
         selectionPath.setStrokeWidth(1.5);
         selectionPath.getStrokeDashArray().addAll(5.0, 5.0);
-        selectionPath.setFill(Color.color(1.0, 1.0, 1.0, 0.05));
-        selectionPath.setStyle("-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.6), 2, 0, 0, 0);");
+        selectionPath.setFill(Color.color(1.0, 1.0, 1.0, 0.04));
+        selectionPath.setStyle(
+                "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.6), 2, 0, 0, 0);");
         selectionPath.setManaged(false);
         selectionPath.setVisible(false);
         canvasManager.getCanvasStack().getChildren().add(selectionPath);
     }
 
+    /**
+     * Starts an AnimationTimer that advances the marching-ants dash offset each frame.
+     */
     private void setupMarchingAnts() {
         new AnimationTimer() {
             @Override
-            public void handle(long now) {
+            public void handle(long currentTime) {
                 if (hasSelection || selectionPath.isVisible()) {
-                    dashOffset -= 0.6;
-                    selectionPath.setStrokeDashOffset(dashOffset);
+                    marchingAntsDashOffset -= 0.6;
+                    selectionPath.setStrokeDashOffset(marchingAntsDashOffset);
                 }
             }
         }.start();
     }
 
-    public void startSelection(double x, double y) {
-        hasSelection = false;
-        selectionCut = false;
-        layerAfterCut = null;
-        creatingNewSelection = true;
-        points.clear();
-        points.add(new Point2D(x, y));
+    // ================= SELECTION CREATION =================
+
+    /**
+     * Begins a new selection at the given canvas position, resetting all prior state.
+     *
+     * @param canvasX starting X in canvas coordinates
+     * @param canvasY starting Y in canvas coordinates
+     */
+    public void startSelection(double canvasX, double canvasY) {
+        hasSelection           = false;
+        selectionHasBeenCut    = false;
+        layerAfterCut          = null;
+        isCreatingNewSelection = true;
+
+        selectionPoints.clear();
+        selectionPoints.add(new Point2D(canvasX, canvasY));
 
         selectionPath.getElements().clear();
         selectionPath.setTranslateX(0);
         selectionPath.setTranslateY(0);
-        selectionPath.getElements().add(new MoveTo(x, y));
-
+        selectionPath.getElements().add(new MoveTo(canvasX, canvasY));
         selectionPath.setVisible(true);
         selectionPath.toFront();
+
         canvasManager.clearTemp();
     }
 
-    public void updateSelection(double x, double y) {
-        if (hasSelection || !creatingNewSelection) return;
-        points.add(new Point2D(x, y));
-        selectionPath.getElements().add(new LineTo(x, y));
+    /**
+     * Updates the selection boundary as the mouse moves.
+     * Rectangle mode redraws the path as a live rectangle preview.
+     * Freeform mode appends each new point to the lasso path.
+     *
+     * @param canvasX current X in canvas coordinates
+     * @param canvasY current Y in canvas coordinates
+     */
+    public void updateSelection(double canvasX, double canvasY) {
+        if (hasSelection || !isCreatingNewSelection) {
+            return;
+        }
+
+        if (rectangleModeEnabled) {
+            // Rebuild the path each frame so the rectangle preview tracks the cursor
+            double startCornerX = selectionPoints.get(0).getX();
+            double startCornerY = selectionPoints.get(0).getY();
+
+            selectionPath.getElements().clear();
+            selectionPath.getElements().add(new MoveTo(startCornerX, startCornerY));
+            selectionPath.getElements().add(new LineTo(canvasX,      startCornerY));
+            selectionPath.getElements().add(new LineTo(canvasX,      canvasY));
+            selectionPath.getElements().add(new LineTo(startCornerX, canvasY));
+            selectionPath.getElements().add(new ClosePath());
+        } else {
+            // Append each new position to the growing freeform lasso
+            selectionPoints.add(new Point2D(canvasX, canvasY));
+            selectionPath.getElements().add(new LineTo(canvasX, canvasY));
+        }
     }
 
+    /**
+     * Closes the selection boundary and captures the enclosed pixels.
+     * Rectangle mode requires at least a start and one drag point.
+     * Freeform mode requires at least three distinct points.
+     */
     public void finalizeSelection() {
-        if (hasSelection || points.size() < 3) return;
+        boolean tooFewPoints = rectangleModeEnabled
+                ? selectionPoints.size() < 2
+                : selectionPoints.size() < 3;
 
-        creatingNewSelection = false;
+        if (hasSelection || tooFewPoints) {
+            return;
+        }
+
+        isCreatingNewSelection = false;
+
+        if (rectangleModeEnabled) {
+            finalizeRectangleSelection();
+        } else {
+            finalizeFreeformSelection();
+        }
+    }
+
+    /**
+     * Finalizes the selection as an axis-aligned rectangle derived from the start corner
+     * and the last cursor position recorded during updateSelection.
+     */
+    private void finalizeRectangleSelection() {
+        double startCornerX = selectionPoints.get(0).getX();
+        double startCornerY = selectionPoints.get(0).getY();
+
+        // Find the end corner from the last LineTo element in the current path
+        double endCornerX = startCornerX;
+        double endCornerY = startCornerY;
+
+        for (PathElement element : selectionPath.getElements()) {
+            if (element instanceof LineTo lineToElement) {
+                endCornerX = lineToElement.getX();
+                endCornerY = lineToElement.getY();
+            }
+        }
+
+        selectionX      = Math.min(startCornerX, endCornerX);
+        selectionY      = Math.min(startCornerY, endCornerY);
+        selectionWidth  = Math.abs(endCornerX - startCornerX);
+        selectionHeight = Math.abs(endCornerY - startCornerY);
+
+        if (selectionWidth < 1 || selectionHeight < 1) {
+            clearSelection();
+            return;
+        }
+
+        // Store the four rectangle corners for later use by cutSelectionFromLayer
+        selectionPoints.clear();
+        selectionPoints.add(new Point2D(selectionX,                   selectionY));
+        selectionPoints.add(new Point2D(selectionX + selectionWidth,  selectionY));
+        selectionPoints.add(new Point2D(selectionX + selectionWidth,  selectionY + selectionHeight));
+        selectionPoints.add(new Point2D(selectionX,                   selectionY + selectionHeight));
+
+        // Rebuild the path as a clean closed rectangle
+        selectionPath.getElements().clear();
+        selectionPath.getElements().add(new MoveTo(selectionX,                   selectionY));
+        selectionPath.getElements().add(new LineTo(selectionX + selectionWidth,  selectionY));
+        selectionPath.getElements().add(new LineTo(selectionX + selectionWidth,  selectionY + selectionHeight));
+        selectionPath.getElements().add(new LineTo(selectionX,                   selectionY + selectionHeight));
         selectionPath.getElements().add(new ClosePath());
 
-        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
-        double maxX = Double.MIN_VALUE, maxY = Double.MIN_VALUE;
-        for (Point2D p : points) {
-            minX = Math.min(minX, p.getX());
-            minY = Math.min(minY, p.getY());
-            maxX = Math.max(maxX, p.getX());
-            maxY = Math.max(maxY, p.getY());
-        }
-
-        selX = minX; selY = minY;
-        selW = maxX - minX; selH = maxY - minY;
-
-        if (selW < 1 || selH < 1) { clearSelection(); return; }
-
-        // Capture the selected pixels (masked to the lasso shape)
-        SnapshotParameters sp = new SnapshotParameters();
-        sp.setFill(Color.TRANSPARENT);
-        sp.setViewport(new Rectangle2D(selX, selY, selW, selH));
-        Image rawSnapshot = layerManager.getActiveLayer().canvas.snapshot(sp, null);
-
-        Canvas maskCanvas = new Canvas(selW, selH);
-        GraphicsContext maskGc = maskCanvas.getGraphicsContext2D();
-        maskGc.beginPath();
-        for (int i = 0; i < points.size(); i++) {
-            Point2D p = points.get(i);
-            maskGc.lineTo(p.getX() - selX, p.getY() - selY);
-        }
-        maskGc.closePath();
-        maskGc.clip();
-        maskGc.drawImage(rawSnapshot, 0, 0);
-
-        SnapshotParameters spMask = new SnapshotParameters();
-        spMask.setFill(Color.TRANSPARENT);
-        selectionImage = maskCanvas.snapshot(spMask, null);
-
-        selectionCut = false;
-        layerAfterCut = null;
-        hasSelection = true;
-        selectionPath.toFront();
-        // Don't draw preview yet — no cut has happened, show marching ants only
+        captureSelectionPixels();
     }
 
-    public void startMove(double x, double y) {
-        dragging = true;
-        creatingNewSelection = false;
+    /**
+     * Finalizes the selection as a freeform lasso polygon.
+     * Computes the bounding box from all recorded lasso points,
+     * then masks the captured pixels to the polygon shape.
+     */
+    private void finalizeFreeformSelection() {
+        selectionPath.getElements().add(new ClosePath());
+
+        double minimumX = Double.MAX_VALUE;
+        double minimumY = Double.MAX_VALUE;
+        double maximumX = Double.MIN_VALUE;
+        double maximumY = Double.MIN_VALUE;
+
+        for (Point2D point : selectionPoints) {
+            minimumX = Math.min(minimumX, point.getX());
+            minimumY = Math.min(minimumY, point.getY());
+            maximumX = Math.max(maximumX, point.getX());
+            maximumY = Math.max(maximumY, point.getY());
+        }
+
+        selectionX      = minimumX;
+        selectionY      = minimumY;
+        selectionWidth  = maximumX - minimumX;
+        selectionHeight = maximumY - minimumY;
+
+        if (selectionWidth < 1 || selectionHeight < 1) {
+            clearSelection();
+            return;
+        }
+
+        // Snapshot the bounding box region from the active layer
+        SnapshotParameters snapshotParameters = new SnapshotParameters();
+        snapshotParameters.setFill(Color.TRANSPARENT);
+        snapshotParameters.setViewport(
+                new Rectangle2D(selectionX, selectionY, selectionWidth, selectionHeight));
+
+        javafx.scene.image.Image rawSnapshot =
+                layerManager.getActiveLayer().canvas.snapshot(snapshotParameters, null);
+
+        // Mask the snapshot to the lasso polygon shape
+        Canvas maskCanvas = new Canvas(selectionWidth, selectionHeight);
+        GraphicsContext maskGraphicsContext = maskCanvas.getGraphicsContext2D();
+        maskGraphicsContext.beginPath();
+        for (Point2D point : selectionPoints) {
+            maskGraphicsContext.lineTo(point.getX() - selectionX, point.getY() - selectionY);
+        }
+        maskGraphicsContext.closePath();
+        maskGraphicsContext.clip();
+        maskGraphicsContext.drawImage(rawSnapshot, 0, 0);
+
+        SnapshotParameters maskSnapshotParameters = new SnapshotParameters();
+        maskSnapshotParameters.setFill(Color.TRANSPARENT);
+        selectionImage = maskCanvas.snapshot(maskSnapshotParameters, null);
+
+        selectionHasBeenCut = false;
+        layerAfterCut       = null;
+        hasSelection        = true;
+        selectionPath.toFront();
+    }
+
+    /**
+     * Directly captures the pixels within the rectangular bounding box (used for rectangle mode).
+     */
+    private void captureSelectionPixels() {
+        SnapshotParameters snapshotParameters = new SnapshotParameters();
+        snapshotParameters.setFill(Color.TRANSPARENT);
+        snapshotParameters.setViewport(
+                new Rectangle2D(selectionX, selectionY, selectionWidth, selectionHeight));
+
+        selectionImage      = layerManager.getActiveLayer().canvas.snapshot(snapshotParameters, null);
+        selectionHasBeenCut = false;
+        layerAfterCut       = null;
+        hasSelection        = true;
+        selectionPath.toFront();
+    }
+
+    // ================= MOVE =================
+
+    /**
+     * Begins a move operation.
+     * If a selection is active, its pixels are cut from the layer on the first move drag.
+     * If no selection is active, the entire layer is prepared for a whole-layer move.
+     *
+     * @param canvasX drag start X in canvas coordinates
+     * @param canvasY drag start Y in canvas coordinates
+     */
+    public void startMove(double canvasX, double canvasY) {
+        isDragging             = true;
+        isCreatingNewSelection = false;
 
         if (hasSelection) {
-            offsetX = x - selX;
-            offsetY = y - selY;
-            if (!selectionCut) {
+            dragOffsetX = canvasX - selectionX;
+            dragOffsetY = canvasY - selectionY;
+
+            // Cut the selection pixels from the layer on the first move drag
+            if (!selectionHasBeenCut) {
                 layerManager.saveState(layerManager.getActiveLayer(),
                         canvasManager.getCanvasWidth(), canvasManager.getCanvasHeight());
                 cutSelectionFromLayer();
-                selectionCut = true;
+                selectionHasBeenCut = true;
 
-                // Snapshot the layer NOW (with the hole in it) as our clean base.
-                // Every drag frame we restore this and draw the floating piece on top.
+                // Snapshot the layer-with-hole so we can restore it cleanly on each drag frame
                 layerAfterCut = new WritableImage(
                         (int) canvasManager.getCanvasWidth(),
                         (int) canvasManager.getCanvasHeight());
                 layerManager.getActiveLayer().canvas.snapshot(null, layerAfterCut);
             }
         } else {
+            // No selection: prepare to move the whole layer
             layerManager.saveState(layerManager.getActiveLayer(),
                     canvasManager.getCanvasWidth(), canvasManager.getCanvasHeight());
-            layerMoveDragStartX = x;
-            layerMoveDragStartY = y;
+            layerMoveDragStartX = canvasX;
+            layerMoveDragStartY = canvasY;
             layerMoveSnapshot = new WritableImage(
                     (int) canvasManager.getCanvasWidth(),
                     (int) canvasManager.getCanvasHeight());
@@ -182,198 +426,328 @@ public class SelectionManager {
     }
 
     /**
-     * Punches the lasso shape out of the active layer using pixel-by-pixel
-     * PixelWriter (required because JavaFX clearRect ignores clip paths).
+     * Removes the selected pixels from the active layer by punching the selection
+     * shape out using pixel-by-pixel PixelWriter.
+     * (clearRect is not used because it ignores clip paths in JavaFX.)
      */
     private void cutSelectionFromLayer() {
-        double w = canvasManager.getCanvasWidth();
-        double h = canvasManager.getCanvasHeight();
-        GraphicsContext gc = layerManager.getActiveLayer().gc;
+        double totalWidth  = canvasManager.getCanvasWidth();
+        double totalHeight = canvasManager.getCanvasHeight();
+        GraphicsContext graphicsContext = layerManager.getActiveLayer().gc;
 
-        WritableImage fullSnap = new WritableImage((int) w, (int) h);
-        layerManager.getActiveLayer().canvas.snapshot(null, fullSnap);
+        // Full layer snapshot to read pixel values from
+        WritableImage fullLayerSnapshot = new WritableImage((int) totalWidth, (int) totalHeight);
+        layerManager.getActiveLayer().canvas.snapshot(null, fullLayerSnapshot);
 
-        // Build a mask: selection shape filled solid black, rest transparent
-        Canvas maskCanvas = new Canvas(w, h);
-        GraphicsContext mgc = maskCanvas.getGraphicsContext2D();
-        mgc.setFill(Color.BLACK);
-        mgc.beginPath();
-        for (int i = 0; i < points.size(); i++) {
-            Point2D p = points.get(i);
-            double tx = p.getX() + selectionPath.getTranslateX();
-            double ty = p.getY() + selectionPath.getTranslateY();
-            if (i == 0) mgc.moveTo(tx, ty);
-            else mgc.lineTo(tx, ty);
+        // Build a mask canvas: selection shape filled solid black, rest transparent
+        Canvas maskCanvas = new Canvas(totalWidth, totalHeight);
+        GraphicsContext maskGraphicsContext = maskCanvas.getGraphicsContext2D();
+        maskGraphicsContext.setFill(Color.BLACK);
+        maskGraphicsContext.beginPath();
+
+        for (int pointIndex = 0; pointIndex < selectionPoints.size(); pointIndex++) {
+            Point2D currentPoint = selectionPoints.get(pointIndex);
+            double translatedX   = currentPoint.getX() + selectionPath.getTranslateX();
+            double translatedY   = currentPoint.getY() + selectionPath.getTranslateY();
+            if (pointIndex == 0) {
+                maskGraphicsContext.moveTo(translatedX, translatedY);
+            } else {
+                maskGraphicsContext.lineTo(translatedX, translatedY);
+            }
         }
-        mgc.closePath();
-        mgc.fill();
-        SnapshotParameters msp = new SnapshotParameters();
-        msp.setFill(Color.TRANSPARENT);
-        WritableImage maskSnap = maskCanvas.snapshot(msp, null);
 
-        // Write result: transparent where mask is opaque, original pixel elsewhere
-        WritableImage result = new WritableImage((int) w, (int) h);
-        var reader = fullSnap.getPixelReader();
-        var maskReader = maskSnap.getPixelReader();
-        var writer = result.getPixelWriter();
-        for (int py = 0; py < (int) h; py++) {
-            for (int px = 0; px < (int) w; px++) {
-                if (maskReader.getColor(px, py).getOpacity() > 0.1) {
-                    writer.setColor(px, py, Color.TRANSPARENT);
+        maskGraphicsContext.closePath();
+        maskGraphicsContext.fill();
+
+        SnapshotParameters maskSnapshotParameters = new SnapshotParameters();
+        maskSnapshotParameters.setFill(Color.TRANSPARENT);
+        WritableImage maskSnapshot = maskCanvas.snapshot(maskSnapshotParameters, null);
+
+        // Compose result: transparent where mask is opaque, original pixel elsewhere
+        WritableImage resultImage    = new WritableImage((int) totalWidth, (int) totalHeight);
+        var originalPixelReader      = fullLayerSnapshot.getPixelReader();
+        var maskPixelReader          = maskSnapshot.getPixelReader();
+        var resultPixelWriter        = resultImage.getPixelWriter();
+
+        for (int rowIndex = 0; rowIndex < (int) totalHeight; rowIndex++) {
+            for (int columnIndex = 0; columnIndex < (int) totalWidth; columnIndex++) {
+                if (maskPixelReader.getColor(columnIndex, rowIndex).getOpacity() > 0.1) {
+                    // Inside selection — erase the pixel
+                    resultPixelWriter.setColor(columnIndex, rowIndex, Color.TRANSPARENT);
                 } else {
-                    writer.setColor(px, py, reader.getColor(px, py));
+                    // Outside selection — keep the original
+                    resultPixelWriter.setColor(columnIndex, rowIndex,
+                            originalPixelReader.getColor(columnIndex, rowIndex));
                 }
             }
         }
 
-        gc.clearRect(0, 0, w, h);
-        gc.drawImage(result, 0, 0);
+        graphicsContext.clearRect(0, 0, totalWidth, totalHeight);
+        graphicsContext.drawImage(resultImage, 0, 0);
     }
 
-    public void updateMove(double x, double y) {
-        if (!dragging || !hasSelection || selectionImage == null) return;
+    /**
+     * Updates the position of the floating selection piece during a drag.
+     * Restores the cut-layer base and redraws the floating piece at the new position.
+     * Uses SRC_OVER blending so the floating piece's original transparency is preserved.
+     *
+     * @param canvasX current drag X in canvas coordinates
+     * @param canvasY current drag Y in canvas coordinates
+     */
+    public void updateMove(double canvasX, double canvasY) {
+        if (!isDragging || !hasSelection || selectionImage == null) {
+            return;
+        }
 
-        double oldX = selX;
-        double oldY = selY;
-        selX = x - offsetX;
-        selY = y - offsetY;
+        double previousSelectionX = selectionX;
+        double previousSelectionY = selectionY;
 
-        selectionPath.setTranslateX(selectionPath.getTranslateX() + (selX - oldX));
-        selectionPath.setTranslateY(selectionPath.getTranslateY() + (selY - oldY));
+        selectionX = canvasX - dragOffsetX;
+        selectionY = canvasY - dragOffsetY;
 
-        // Restore the cut layer, then draw the floating piece on top.
-        // This is done directly on the layer canvas so it's always visible.
+        // Translate the visual selection path by the same delta
+        selectionPath.setTranslateX(
+                selectionPath.getTranslateX() + (selectionX - previousSelectionX));
+        selectionPath.setTranslateY(
+                selectionPath.getTranslateY() + (selectionY - previousSelectionY));
+
+        // Restore the layer-with-hole, then draw the floating piece on top.
+        // globalAlpha is reset to 1.0 and blendMode to null so that the
+        // selectionImage's own alpha channel controls its transparency exactly
+        // as it was when the selection was captured — no extra opacity applied.
         if (layerAfterCut != null) {
-            GraphicsContext gc = layerManager.getActiveLayer().gc;
-            gc.clearRect(0, 0, canvasManager.getCanvasWidth(), canvasManager.getCanvasHeight());
-            gc.drawImage(layerAfterCut, 0, 0);
-            gc.drawImage(selectionImage, selX, selY);
+            GraphicsContext graphicsContext = layerManager.getActiveLayer().gc;
+            graphicsContext.setGlobalBlendMode(null);
+            graphicsContext.setGlobalAlpha(1.0);
+            graphicsContext.clearRect(0, 0,
+                    canvasManager.getCanvasWidth(), canvasManager.getCanvasHeight());
+            graphicsContext.drawImage(layerAfterCut, 0, 0);
+
+            // Draw the floating piece; its per-pixel alpha is respected by SRC_OVER
+            graphicsContext.drawImage(selectionImage, selectionX, selectionY);
         }
 
         selectionPath.toFront();
     }
 
-    public void updateLayerMove(double x, double y) {
-        if (!dragging || layerMoveSnapshot == null) return;
-        double dx = x - layerMoveDragStartX;
-        double dy = y - layerMoveDragStartY;
-        GraphicsContext gc = layerManager.getActiveLayer().gc;
-        gc.clearRect(0, 0, canvasManager.getCanvasWidth(), canvasManager.getCanvasHeight());
-        gc.drawImage(layerMoveSnapshot, dx, dy);
+    /**
+     * Moves the entire active layer by the delta from the drag start position.
+     * Uses SRC_OVER blending so per-pixel transparency in the layer snapshot is preserved.
+     *
+     * @param canvasX current drag X in canvas coordinates
+     * @param canvasY current drag Y in canvas coordinates
+     */
+    public void updateLayerMove(double canvasX, double canvasY) {
+        if (!isDragging || layerMoveSnapshot == null) {
+            return;
+        }
+
+        double deltaX = canvasX - layerMoveDragStartX;
+        double deltaY = canvasY - layerMoveDragStartY;
+
+        GraphicsContext graphicsContext = layerManager.getActiveLayer().gc;
+
+        // Reset blend state so the snapshot's alpha channel is respected
+        graphicsContext.setGlobalBlendMode(null);
+        graphicsContext.setGlobalAlpha(1.0);
+        graphicsContext.clearRect(0, 0,
+                canvasManager.getCanvasWidth(), canvasManager.getCanvasHeight());
+
+        // Draw the layer snapshot at the offset position; transparency is preserved by SRC_OVER
+        graphicsContext.drawImage(layerMoveSnapshot, deltaX, deltaY);
     }
 
+    /**
+     * Ends the current move drag without committing the selection.
+     */
     public void endMove() {
-        dragging = false;
+        isDragging        = false;
         layerMoveSnapshot = null;
-        // layerAfterCut is kept alive until the selection is committed/cleared
-        // so the layer state remains correct if the user moves again.
+        // layerAfterCut is retained so repeated moves within the same selection are correct
     }
 
+    // ================= COMMIT / CLEAR =================
+
+    /**
+     * Draws the selection image preview on the temp canvas.
+     */
     public void drawPreview() {
         canvasManager.clearTemp();
-        if (selectionImage == null) return;
-        canvasManager.getTempGc().drawImage(selectionImage, selX, selY);
+        if (selectionImage == null) {
+            return;
+        }
+        canvasManager.getTempGc().drawImage(selectionImage, selectionX, selectionY);
         selectionPath.toFront();
     }
 
+    /**
+     * Stamps the floating selection piece at its current position onto the active layer
+     * and clears all selection state.
+     */
     public void commitSelection() {
-        if (!hasSelection || selectionImage == null) return;
-        if (!selectionCut) {
+        if (!hasSelection || selectionImage == null) {
+            return;
+        }
+        if (!selectionHasBeenCut) {
             layerManager.saveState(layerManager.getActiveLayer(),
                     canvasManager.getCanvasWidth(), canvasManager.getCanvasHeight());
             cutSelectionFromLayer();
         }
-        // Stamp the floating piece at its final position
-        layerManager.getActiveLayer().gc.drawImage(selectionImage, selX, selY);
+        // Stamp the floating piece at its final position; SRC_OVER preserves its alpha
+        layerManager.getActiveLayer().gc.setGlobalAlpha(1.0);
+        layerManager.getActiveLayer().gc.setGlobalBlendMode(null);
+        layerManager.getActiveLayer().gc.drawImage(selectionImage, selectionX, selectionY);
         clearSelection();
     }
 
+    /**
+     * Clears the active selection.
+     * If the selection was cut but never committed, stamps it back at its current position.
+     */
     public void clearSelection() {
-        // If cut but never committed, stamp the piece back where it currently is
-        if (hasSelection && selectionCut && selectionImage != null) {
-            layerManager.getActiveLayer().gc.drawImage(selectionImage, selX, selY);
+        // Stamp the floating piece back if it was cut but not committed
+        if (hasSelection && selectionHasBeenCut && selectionImage != null) {
+            layerManager.getActiveLayer().gc.setGlobalAlpha(1.0);
+            layerManager.getActiveLayer().gc.setGlobalBlendMode(null);
+            layerManager.getActiveLayer().gc.drawImage(selectionImage, selectionX, selectionY);
         }
-        hasSelection = false;
-        selectionCut = false;
-        creatingNewSelection = false;
-        selectionImage = null;
-        layerAfterCut = null;
-        layerMoveSnapshot = null;
+
+        hasSelection           = false;
+        selectionHasBeenCut    = false;
+        isCreatingNewSelection = false;
+        selectionImage         = null;
+        layerAfterCut          = null;
+        layerMoveSnapshot      = null;
+
         selectionPath.setVisible(false);
         selectionPath.setTranslateX(0);
         selectionPath.setTranslateY(0);
-        points.clear();
+
+        selectionPoints.clear();
         canvasManager.clearTemp();
     }
 
-    public boolean isClickInside(double x, double y) {
-        return selectionPath.isVisible() && selectionPath.getBoundsInParent().contains(x, y);
+    // ================= HELPERS =================
+
+    /**
+     * Returns true when the given canvas position falls within the visible selection path bounds.
+     *
+     * @param canvasX X position to test in canvas coordinates
+     * @param canvasY Y position to test in canvas coordinates
+     */
+    public boolean isClickInside(double canvasX, double canvasY) {
+        return selectionPath.isVisible()
+                && selectionPath.getBoundsInParent().contains(canvasX, canvasY);
     }
 
-    public boolean isCreatingNewSelection() { return creatingNewSelection; }
-
-    private void applyPathToGC(GraphicsContext gc, double transX, double transY) {
-        gc.beginPath();
-        for (int i = 0; i < points.size(); i++) {
-            Point2D p = points.get(i);
-            if (i == 0) gc.moveTo(p.getX() + transX, p.getY() + transY);
-            else gc.lineTo(p.getX() + transX, p.getY() + transY);
+    /**
+     * Applies the selection shape as a clip region to the given GraphicsContext.
+     * Saves the GraphicsContext state first so restoreClipping() can undo it.
+     *
+     * @param graphicsContext the GraphicsContext to clip
+     */
+    public void applyClipping(GraphicsContext graphicsContext) {
+        if (hasSelection) {
+            graphicsContext.save();
+            graphicsContext.beginPath();
+            for (int pointIndex = 0; pointIndex < selectionPoints.size(); pointIndex++) {
+                Point2D currentPoint = selectionPoints.get(pointIndex);
+                double translatedX   = currentPoint.getX() + selectionPath.getTranslateX();
+                double translatedY   = currentPoint.getY() + selectionPath.getTranslateY();
+                if (pointIndex == 0) {
+                    graphicsContext.moveTo(translatedX, translatedY);
+                } else {
+                    graphicsContext.lineTo(translatedX, translatedY);
+                }
+            }
+            graphicsContext.closePath();
+            graphicsContext.clip();
         }
-        gc.closePath();
     }
 
-    public void registerShortcuts(Scene scene) {
-        scene.getAccelerators().put(
-                new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN), this::copy);
-        scene.getAccelerators().put(
-                new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN), this::paste);
-        scene.getAccelerators().put(
-                new KeyCodeCombination(KeyCode.D), this::clearSelection);
+    /**
+     * Restores the GraphicsContext state after applyClipping().
+     *
+     * @param graphicsContext the GraphicsContext to restore
+     */
+    public void restoreClipping(GraphicsContext graphicsContext) {
+        if (hasSelection) {
+            graphicsContext.restore();
+        }
     }
 
-    public void copy() { if (hasSelection) clipboardImage = selectionImage; }
+    // ================= COPY / PASTE =================
 
+    /**
+     * Copies the current selection image to the internal clipboard.
+     */
+    public void copy() {
+        if (hasSelection) {
+            clipboardImage = selectionImage;
+        }
+    }
+
+    /**
+     * Pastes the clipboard image as a new floating selection near the top-left of the canvas.
+     */
     public void paste() {
-        if (clipboardImage == null) return;
+        if (clipboardImage == null) {
+            return;
+        }
+
+        // Commit any existing selection before pasting
         commitSelection();
-        selectionImage = clipboardImage;
-        selX = 50; selY = 50;
-        selW = selectionImage.getWidth();
-        selH = selectionImage.getHeight();
-        hasSelection = true;
-        selectionCut = true;
+
+        selectionImage  = clipboardImage;
+        selectionX      = 50;
+        selectionY      = 50;
+        selectionWidth  = selectionImage.getWidth();
+        selectionHeight = selectionImage.getHeight();
+
+        hasSelection        = true;
+        selectionHasBeenCut = true;
+
+        // Snapshot the current layer as the base for move restoration
         layerAfterCut = new WritableImage(
                 (int) canvasManager.getCanvasWidth(),
                 (int) canvasManager.getCanvasHeight());
         layerManager.getActiveLayer().canvas.snapshot(null, layerAfterCut);
-        points.clear();
-        points.add(new Point2D(selX, selY));
-        points.add(new Point2D(selX + selW, selY));
-        points.add(new Point2D(selX + selW, selY + selH));
-        points.add(new Point2D(selX, selY + selH));
+
+        // Record the four rectangle corners as selection points
+        selectionPoints.clear();
+        selectionPoints.add(new Point2D(selectionX,                   selectionY));
+        selectionPoints.add(new Point2D(selectionX + selectionWidth,  selectionY));
+        selectionPoints.add(new Point2D(selectionX + selectionWidth,  selectionY + selectionHeight));
+        selectionPoints.add(new Point2D(selectionX,                   selectionY + selectionHeight));
+
+        // Build the selection path around the pasted image
         selectionPath.getElements().clear();
-        selectionPath.getElements().add(new MoveTo(selX, selY));
-        selectionPath.getElements().add(new LineTo(selX + selW, selY));
-        selectionPath.getElements().add(new LineTo(selX + selW, selY + selH));
-        selectionPath.getElements().add(new LineTo(selX, selY + selH));
+        selectionPath.getElements().add(new MoveTo(selectionX,                   selectionY));
+        selectionPath.getElements().add(new LineTo(selectionX + selectionWidth,  selectionY));
+        selectionPath.getElements().add(new LineTo(selectionX + selectionWidth,  selectionY + selectionHeight));
+        selectionPath.getElements().add(new LineTo(selectionX,                   selectionY + selectionHeight));
         selectionPath.getElements().add(new ClosePath());
+
         selectionPath.setTranslateX(0);
         selectionPath.setTranslateY(0);
         selectionPath.setVisible(true);
+
         drawPreview();
     }
 
-    public boolean hasSelection() { return hasSelection; }
+    // ================= SHORTCUTS =================
 
-    public void applyClipping(GraphicsContext gc) {
-        if (hasSelection) {
-            gc.save();
-            applyPathToGC(gc, selectionPath.getTranslateX(), selectionPath.getTranslateY());
-            gc.clip();
-        }
-    }
-
-    public void restoreClipping(GraphicsContext gc) {
-        if (hasSelection) gc.restore();
+    /**
+     * Registers keyboard accelerators for copy, paste, and clear-selection.
+     *
+     * @param targetScene the scene to register the shortcuts on
+     */
+    public void registerShortcuts(Scene targetScene) {
+        targetScene.getAccelerators().put(
+                new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN), this::copy);
+        targetScene.getAccelerators().put(
+                new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN), this::paste);
+        targetScene.getAccelerators().put(
+                new KeyCodeCombination(KeyCode.D), this::clearSelection);
     }
 }

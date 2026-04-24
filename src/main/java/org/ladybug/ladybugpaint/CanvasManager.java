@@ -13,118 +13,218 @@ import javafx.scene.transform.Scale;
 
 public class CanvasManager {
 
+    // ================= CONSTANTS =================
+
+    // Minimum allowed zoom level (5% of original size)
+    private static final double ZOOM_MINIMUM = 0.05;
+
+    // Maximum allowed zoom level (3200% of original size)
+    private static final double ZOOM_MAXIMUM = 32.0;
+
+    // Fractional zoom step used by the button-based zoom in/out controls
+    private static final double ZOOM_BUTTON_STEP = 0.12;
+
+    // ================= FIELDS =================
+
+    // The stacking pane that holds all layer canvases and the temp canvas
     private final StackPane canvasStack = new StackPane();
+
+    // Transparent overlay canvas used for shape previews and selection indicators
     private Canvas tempCanvas;
-    private GraphicsContext tempGc;
-    private double canvasWidth;
-    private double canvasHeight;
+
+    // Graphics context for the temp canvas
+    private GraphicsContext tempGraphicsContext;
+
+    // Width of the drawing canvas in pixels
+    private double canvasWidth = 0;
+
+    // Height of the drawing canvas in pixels
+    private double canvasHeight = 0;
+
+    // Current zoom scale factor (1.0 = 100%)
     private double zoomFactor = 1.0;
 
-    // The outer Group that wraps canvasStack — zoom is applied here
-    // so the canvas coordinate system is never distorted.
+    // The Group wrapping canvasStack; zoom scale transform is applied here
+    // so canvas coordinate space is never distorted
     private Group zoomGroup;
-    // Pivot offsets used to keep zoom centred on the mouse position
-    private double pivotX = 0;
-    private double pivotY = 0;
 
-    private static final double ZOOM_MIN  = 0.05;
-    private static final double ZOOM_MAX  = 32.0;
-    private static final double ZOOM_STEP = 0.12; // fractional step per scroll tick
+    // ================= ACCESSORS =================
 
-    public Canvas getTempCanvas() { return tempCanvas; }
+    /**
+     * Returns the temp overlay canvas used for shape and selection previews.
+     */
+    public Canvas getTempCanvas() {
+        return tempCanvas;
+    }
 
+    /**
+     * Returns the StackPane that contains all layer canvases.
+     */
+    public StackPane getCanvasStack() {
+        return canvasStack;
+    }
+
+    /**
+     * Returns the GraphicsContext of the temp overlay canvas.
+     */
+    public GraphicsContext getTempGc() {
+        return tempGraphicsContext;
+    }
+
+    /**
+     * Returns the canvas width in pixels.
+     */
+    public double getCanvasWidth() {
+        return canvasWidth;
+    }
+
+    /**
+     * Returns the canvas height in pixels.
+     */
+    public double getCanvasHeight() {
+        return canvasHeight;
+    }
+
+    /**
+     * Returns the current zoom factor.
+     */
+    public double getZoomFactor() {
+        return zoomFactor;
+    }
+
+    // ================= INITIALISATION =================
+
+    /**
+     * Initialises the canvas surfaces at the given dimensions.
+     * Must be called before any other method.
+     *
+     * @param width  canvas width in pixels; must be positive
+     * @param height canvas height in pixels; must be positive
+     */
     public void init(double width, double height) {
         this.canvasWidth  = width;
         this.canvasHeight = height;
+
+        // Create the transparent temp overlay for shape/selection previews
         tempCanvas = new Canvas(width, height);
-        tempGc = tempCanvas.getGraphicsContext2D();
+        tempGraphicsContext = tempCanvas.getGraphicsContext2D();
+
+        // Mouse events should fall through the temp canvas to the layers beneath
         tempCanvas.setMouseTransparent(true);
+
         canvasStack.getChildren().add(tempCanvas);
         tempCanvas.toFront();
     }
 
-    public void applyAutoZoom(double availableW, double availableH) {
-        zoomFactor = Math.min(availableW / canvasWidth, availableH / canvasHeight);
-        if (zoomFactor > 1.0) zoomFactor = 1.0;
+    /**
+     * Calculates and applies an initial zoom so the canvas fits within the available space.
+     * Never zooms above 100% (zoomFactor is clamped to 1.0).
+     *
+     * @param availableWidth  the width of the area the canvas must fit inside
+     * @param availableHeight the height of the area the canvas must fit inside
+     */
+    public void applyAutoZoom(double availableWidth, double availableHeight) {
+        zoomFactor = Math.min(availableWidth / canvasWidth, availableHeight / canvasHeight);
+
+        // Do not zoom in beyond 100% on startup
+        if (zoomFactor > 1.0) {
+            zoomFactor = 1.0;
+        }
+
         applyZoomTransform();
     }
 
+    private void attachPanning(Node scrollTarget) {
+        scrollTarget.setOnScroll(scrollEvent -> {
+            // Only pan if we are NOT performing a pinch-to-zoom (optional check)
+            if (zoomGroup != null) {
+                // Update translation based on scroll deltas
+                // deltaX and deltaY are provided by the mouse wheel or trackpad
+                zoomGroup.setTranslateX(zoomGroup.getTranslateX() + scrollEvent.getDeltaX());
+                zoomGroup.setTranslateY(zoomGroup.getTranslateY() + scrollEvent.getDeltaY());
+            }
+            scrollEvent.consume();
+        });
+    }
     // ================= ZOOM =================
 
     /**
-     * Attaches smooth scroll-to-zoom to the given container node.
-     * Zoom is centred on the mouse cursor so the point under the cursor
-     * stays fixed as you zoom in/out
+     * Attaches a pinch-to-zoom gesture handler to the given container node.
      *
-     * Call this after createCenteredView() so zoomGroup is initialised.
+     * The handler uses JavaFX's ZoomEvent (fired by trackpad pinch gestures and
+     * touch screens) rather than scroll events, so two-finger scroll pans normally
+     * and only a deliberate pinch gesture zooms.  Zoom is centred on the gesture
+     * pivot reported by the event so the point under the fingers stays fixed.
+     *
+     * @param scrollTarget the node to attach the gesture handler to
      */
     public void attachZoom(Node scrollTarget) {
-        scrollTarget.setOnScroll(e -> {
-            if (e.getDeltaY() == 0) return;
+        // Pinch-to-zoom via ZoomEvent (trackpad pinch / touch screen)
+        scrollTarget.setOnZoom(zoomEvent -> {
+            double zoomDelta = zoomEvent.getZoomFactor();
 
-            double oldZoom = zoomFactor;
-            double factor  = e.getDeltaY() > 0
-                    ? (1.0 + ZOOM_STEP)
-                    : (1.0 / (1.0 + ZOOM_STEP));
+            double oldZoomFactor = zoomFactor;
+            zoomFactor = Math.max(ZOOM_MINIMUM,
+                    Math.min(ZOOM_MAXIMUM, zoomFactor * zoomDelta));
 
-            zoomFactor = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomFactor * factor));
+            // Keep the gesture pivot point fixed on screen by adjusting the group translation
+            double pivotInStackX = zoomEvent.getX() / oldZoomFactor;
+            double pivotInStackY = zoomEvent.getY() / oldZoomFactor;
 
-            // Convert mouse position to canvas-stack-local coords at the OLD zoom
-            // so we can compute how much to translate to keep that point fixed.
-            double mouseInStackX = e.getX() / oldZoom;
-            double mouseInStackY = e.getY() / oldZoom;
-
-            // After zoom, the same canvas point appears at a different screen position.
-            // Adjust the group's translate to compensate.
-            double dx = (mouseInStackX * oldZoom) - (mouseInStackX * zoomFactor);
-            double dy = (mouseInStackY * oldZoom) - (mouseInStackY * zoomFactor);
+            double translationDeltaX = (pivotInStackX * oldZoomFactor)
+                    - (pivotInStackX * zoomFactor);
+            double translationDeltaY = (pivotInStackY * oldZoomFactor)
+                    - (pivotInStackY * zoomFactor);
 
             if (zoomGroup != null) {
-                zoomGroup.setTranslateX(zoomGroup.getTranslateX() + dx);
-                zoomGroup.setTranslateY(zoomGroup.getTranslateY() + dy);
+                zoomGroup.setTranslateX(zoomGroup.getTranslateX() + translationDeltaX);
+                zoomGroup.setTranslateY(zoomGroup.getTranslateY() + translationDeltaY);
             }
 
             applyZoomTransform();
-            e.consume();
+            zoomEvent.consume();
         });
     }
 
-    /** Zoom in by one step, centred on the canvas centre. */
+    /**
+     * Zooms in by one button step, centred on the canvas centre.
+     */
     public void zoomIn() {
-        zoomFactor = Math.min(ZOOM_MAX, zoomFactor * (1.0 + ZOOM_STEP * 3));
+        zoomFactor = Math.min(ZOOM_MAXIMUM, zoomFactor * (1.0 + ZOOM_BUTTON_STEP * 3));
         applyZoomTransform();
     }
 
-    /** Zoom out by one step, centred on the canvas centre. */
+    /**
+     * Zooms out by one button step, centred on the canvas centre.
+     */
     public void zoomOut() {
-        zoomFactor = Math.max(ZOOM_MIN, zoomFactor / (1.0 + ZOOM_STEP * 3));
+        zoomFactor = Math.max(ZOOM_MINIMUM, zoomFactor / (1.0 + ZOOM_BUTTON_STEP * 3));
         applyZoomTransform();
     }
 
-    /** Reset zoom to fit the canvas in the available space (same as initial auto-zoom). */
-    /** * Reset zoom to 100% (1:1 scale) and center the canvas
-     * by clearing all translation offsets.
+    /**
+     * Resets the zoom to 100% and clears all panning offsets so the canvas
+     * is centred in the viewport.
      */
     public void zoomReset() {
-        // 1. Reset the zoom factor to 100%
-        zoomFactor = 1.0;
+        zoomFactor = 0.5;
 
-        // 2. Clear any panning/offsets applied during scroll-zoom
+        // Clear any translation accumulated during pinch/button zooming
         if (zoomGroup != null) {
             zoomGroup.setTranslateX(0);
             zoomGroup.setTranslateY(0);
         }
 
-        // 3. Ensure the canvasStack itself isn't carrying internal offsets
         canvasStack.setTranslateX(0);
         canvasStack.setTranslateY(0);
 
-        // 4. Re-apply the scale transform
         applyZoomTransform();
     }
 
-    public double getZoomFactor() { return zoomFactor; }
-
+    /**
+     * Applies the current zoom factor as a Scale transform on the canvasStack.
+     * The side panels are not children of canvasStack so they are unaffected.
+     */
     private void applyZoomTransform() {
         canvasStack.getTransforms().clear();
         canvasStack.getTransforms().add(new Scale(zoomFactor, zoomFactor));
@@ -132,78 +232,127 @@ public class CanvasManager {
         canvasStack.setPickOnBounds(false);
     }
 
-    // ================= ACCESSORS =================
+    // ================= LAYER MANAGEMENT =================
 
-    public StackPane getCanvasStack() { return canvasStack; }
-    public GraphicsContext getTempGc() { return tempGc; }
-    public double getCanvasWidth()  { return canvasWidth; }
-    public double getCanvasHeight() { return canvasHeight; }
-
-    public void addLayerCanvas(Canvas canvas) {
-        canvasStack.getChildren().add(canvas);
+    /**
+     * Adds a layer canvas to the canvas stack and keeps the temp canvas on top.
+     *
+     * @param layerCanvas the canvas to add
+     */
+    public void addLayerCanvas(Canvas layerCanvas) {
+        canvasStack.getChildren().add(layerCanvas);
         tempCanvas.toFront();
     }
 
-    public void removeLayerCanvas(Canvas canvas) {
-        canvasStack.getChildren().remove(canvas);
+    /**
+     * Removes a layer canvas from the canvas stack.
+     *
+     * @param layerCanvas the canvas to remove
+     */
+    public void removeLayerCanvas(Canvas layerCanvas) {
+        canvasStack.getChildren().remove(layerCanvas);
         tempCanvas.toFront();
     }
 
     // ================= SNAPSHOT =================
 
+    /**
+     * Returns a full-resolution composite snapshot of all visible layers.
+     * The temp canvas and any selection path overlays are hidden for the snapshot.
+     */
     public WritableImage snapshotFull() {
-        boolean tempVis = tempCanvas.isVisible();
+        boolean tempWasVisible = tempCanvas.isVisible();
         tempCanvas.setVisible(false);
 
-        Node selPath = canvasStack.getChildren().stream()
-                .filter(n -> n instanceof javafx.scene.shape.Path)
-                .findFirst().orElse(null);
-        boolean pathVis = false;
-        if (selPath != null) {
-            pathVis = selPath.isVisible();
-            selPath.setVisible(false);
+        // Also hide any selection path overlay that may be in the canvas stack
+        Node selectionPathNode = canvasStack.getChildren().stream()
+                .filter(node -> node instanceof javafx.scene.shape.Path)
+                .findFirst()
+                .orElse(null);
+
+        boolean pathWasVisible = false;
+        if (selectionPathNode != null) {
+            pathWasVisible = selectionPathNode.isVisible();
+            selectionPathNode.setVisible(false);
         }
 
-        SnapshotParameters sp = new SnapshotParameters();
-        sp.setFill(Color.TRANSPARENT);
-        sp.setTransform(new Scale(1.0 / zoomFactor, 1.0 / zoomFactor));
+        // Snapshot at 1:1 scale regardless of current zoom
+        SnapshotParameters snapshotParameters = new SnapshotParameters();
+        snapshotParameters.setFill(Color.TRANSPARENT);
+        snapshotParameters.setTransform(new Scale(1.0 / zoomFactor, 1.0 / zoomFactor));
 
-        WritableImage snap   = new WritableImage((int) canvasWidth, (int) canvasHeight);
-        WritableImage result = canvasStack.snapshot(sp, snap);
+        WritableImage resultImage = new WritableImage((int) canvasWidth, (int) canvasHeight);
+        canvasStack.snapshot(snapshotParameters, resultImage);
 
-        tempCanvas.setVisible(tempVis);
-        if (selPath != null) selPath.setVisible(pathVis);
+        // Restore visibility
+        tempCanvas.setVisible(tempWasVisible);
+        if (selectionPathNode != null) {
+            selectionPathNode.setVisible(pathWasVisible);
+        }
 
-        return result;
+        return resultImage;
     }
 
+    /**
+     * Returns a transparent snapshot of any single node at its natural size.
+     *
+     * @param targetNode the node to snapshot
+     */
+    public WritableImage snapshot(Node targetNode) {
+        SnapshotParameters snapshotParameters = new SnapshotParameters();
+        snapshotParameters.setFill(Color.TRANSPARENT);
+
+        int snapshotWidth  = (int) targetNode.getBoundsInLocal().getWidth();
+        int snapshotHeight = (int) targetNode.getBoundsInLocal().getHeight();
+
+        return targetNode.snapshot(snapshotParameters,
+                new WritableImage(snapshotWidth, snapshotHeight));
+    }
+
+    /**
+     * Clears all pixels on the temp overlay canvas.
+     */
     public void clearTemp() {
-        tempGc.clearRect(0, 0, canvasWidth, canvasHeight);
+        tempGraphicsContext.clearRect(0, 0, canvasWidth, canvasHeight);
     }
 
+    /**
+     * Sets the opacity of the temp overlay canvas.
+     *
+     * @param opacity opacity value between 0.0 (transparent) and 1.0 (opaque)
+     */
     public void setTempOpacity(double opacity) {
         tempCanvas.setOpacity(opacity);
         tempCanvas.toFront();
     }
 
+    // ================= VIEW CREATION =================
+
     /**
-     * Returns a centred, scrollable view of the canvas.
-     * Zoom is applied to the inner Group so panning (via translate) is independent.
+     * Creates and returns the centred canvas viewport.
+     *
+     * The canvas stack is wrapped in a Group so that the Scale transform applied
+     * during zoom does not affect the surrounding BorderPane layout — specifically
+     * the left (layer panel) and right (color panel) side panels remain at their
+     * fixed sizes regardless of zoom level.
+     *
+     * The pinch-to-zoom gesture handler is attached to the returned StackPane container.
+     *
+     * @return a StackPane suitable for placement in BorderPane.setCenter()
      */
     public StackPane createCenteredView() {
         zoomGroup = new Group(canvasStack);
-        StackPane container = new StackPane(zoomGroup);
-        container.setStyle("-fx-background-color: #3a3a3a;"); // checkerboard-grey workspace bg
-        // Attach zoom scroll handler to the container
-        attachZoom(container);
-        return container;
-    }
 
-    public WritableImage snapshot(Node node) {
-        SnapshotParameters sp = new SnapshotParameters();
-        sp.setFill(Color.TRANSPARENT);
-        int w = (int) node.getBoundsInLocal().getWidth();
-        int h = (int) node.getBoundsInLocal().getHeight();
-        return node.snapshot(sp, new WritableImage(w, h));
+        // Dark workspace background — visible around the canvas when zoomed out
+        StackPane viewportContainer = new StackPane(zoomGroup);
+        viewportContainer.setStyle("-fx-background-color: #2a2a30;");
+        attachZoom(viewportContainer);
+        attachPanning(viewportContainer);
+        // Attach pinch-to-zoom to the viewport container only.
+        // Because this container is only the center region of the BorderPane,
+        // the side panels are never inside it and therefore never affected by zoom.
+        attachZoom(viewportContainer);
+
+        return viewportContainer;
     }
 }
